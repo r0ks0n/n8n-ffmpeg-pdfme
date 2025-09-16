@@ -6,26 +6,37 @@
     <title>PDFme Editor (Railway)</title>
     <style>
       html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-      #topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; background: #fff; z-index: 5; }
-      #container { height: calc(100% - 50px); }
+      #topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; background: #fff; z-index: 5; flex-wrap: wrap; }
+      #container { height: calc(100% - 60px); }
       button { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; cursor: pointer; }
       input, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 8px; }
       .spacer { flex: 1; }
+      .muted { color: #6b7280; font-size: 12px; }
+      #currentId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
     </style>
   </head>
   <body>
     <div id="topbar">
       <strong>PDFme Editor</strong>
       <span class="spacer"></span>
-      <input id="tplName" placeholder="Template name" />
+
+      <label class="muted">Name:</label>
+      <input id="tplName" placeholder="Template name" style="min-width:220px" />
+
       <button id="btnNew">New</button>
       <button id="btnSave">Save</button>
+      <button id="btnSaveAs">Save As</button>
       <button id="btnPreview">Preview</button>
-      <select id="tplList"></select>
+
+      <select id="tplList" style="min-width:320px"></select>
       <button id="btnLoad">Load</button>
+
       <button id="btnSetToken">Set Token</button>
       <button id="btnLogout" style="display:none">Logout</button>
+
+      <div class="muted">Current ID: <span id="currentId">(none)</span></div>
     </div>
+
     <div id="container"></div>
 
     <script type="module">
@@ -73,6 +84,19 @@
         alert('Logged out.');
       };
 
+      // --- Track current loaded template ID ---
+      let currentId = null;
+      function setCurrentId(id) {
+        currentId = id || null;
+        document.getElementById('currentId').textContent = currentId || '(none)';
+        // Also try to select it in dropdown if present
+        const sel = document.getElementById('tplList');
+        if (currentId) {
+          const opt = [...sel.options].find(o => o.value === currentId);
+          if (opt) sel.value = currentId;
+        }
+      }
+
       // --- Initial template (1 page with a single text field) ---
       const initialTemplate = {
         basePdf: BLANK_PDF,
@@ -107,18 +131,18 @@
             opt.value = r.id; opt.textContent = `${r.name} — ${r.id}`;
             select.appendChild(opt);
           }
+          // try keep selection on currentId
+          if (currentId) {
+            const opt = [...select.options].find(o => o.value === currentId);
+            if (opt) select.value = currentId;
+          }
         } catch (e) {
           console.error(e);
         }
       }
 
-      // --- UI handlers ---
-      document.getElementById('btnNew').onclick = () => {
-        designer.updateTemplate(initialTemplate);
-        document.getElementById('tplName').value = '';
-      };
-
-      document.getElementById('btnSave').onclick = async () => {
+      // --- Helpers to Save/Update ---
+      async function createTemplate() {
         const name = document.getElementById('tplName').value || 'Untitled Template';
         const template = designer.getTemplate();
         const res = await fetch(`${API.base}/api/templates`, {
@@ -126,18 +150,69 @@
           headers: headers(),
           body: JSON.stringify({ name, template })
         });
-        if (!res.ok) return alert('Save failed');
-        alert('Saved!');
-        refreshList();
+        if (!res.ok) throw new Error('Create failed');
+        const obj = await res.json(); // { id, name, template, ...}
+        setCurrentId(obj.id);
+        return obj;
+      }
+
+      async function updateTemplate(id) {
+        const name = document.getElementById('tplName').value || 'Untitled Template';
+        const template = designer.getTemplate();
+        const res = await fetch(`${API.base}/api/templates/${id}`, {
+          method: 'PUT',
+          headers: headers(),
+          body: JSON.stringify({ name, template })
+        });
+        if (!res.ok) throw new Error('Update failed');
+        const obj = await res.json();
+        setCurrentId(obj.id);
+        return obj;
+      }
+
+      // --- UI handlers ---
+      document.getElementById('btnNew').onclick = () => {
+        designer.updateTemplate(initialTemplate);
+        document.getElementById('tplName').value = '';
+        setCurrentId(null); // new template, no ID yet
+      };
+
+      document.getElementById('btnSave').onclick = async () => {
+        try {
+          if (currentId) {
+            await updateTemplate(currentId);  // UPDATE existing
+          } else {
+            await createTemplate();           // CREATE new
+          }
+          await refreshList();
+          alert('Saved!');
+        } catch (e) {
+          console.error(e);
+          alert(e.message || 'Save failed');
+        }
+      };
+
+      document.getElementById('btnSaveAs').onclick = async () => {
+        try {
+          // Save As => always create a new one, independent of currentId
+          setCurrentId(null);
+          await createTemplate();
+          await refreshList();
+          alert('Saved as new template!');
+        } catch (e) {
+          console.error(e);
+          alert(e.message || 'Save As failed');
+        }
       };
 
       document.getElementById('btnLoad').onclick = async () => {
         const id = document.getElementById('tplList').value; if (!id) return;
         const res = await fetch(`${API.base}/api/templates/${id}`, { headers: headers() });
         if (!res.ok) return alert('Load failed');
-        const { name, template } = await res.json();
+        const { name, template, id: loadedId } = await res.json();
         document.getElementById('tplName').value = name;
         designer.updateTemplate(template);
+        setCurrentId(loadedId || id);
       };
 
       document.getElementById('btnPreview').onclick = async () => {
@@ -162,6 +237,7 @@
 
       // --- Init ---
       updateAuthButtons();
+      setCurrentId(null);
       refreshList();
     </script>
   </body>
