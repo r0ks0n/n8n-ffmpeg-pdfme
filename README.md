@@ -1,12 +1,18 @@
-# PDFme + n8n monorepo for Railway
+# PDFme Editor on Railway (editor-only repo)
 
-- `apps/editor` → PDFme Editor + API (Express, Postgres)
-- `apps/n8n` → n8n with pdfme libraries (Dockerfile)
+This repo hosts a simple PDFme Designer UI and an Express API with Postgres storage.
 
-## Deploy (same Railway project)
-1. Push this repo to GitHub.
-2. In Railway project, create **Service A**: Deploy from this repo → set **Root Directory** to `apps/editor`. Attach PostgreSQL and set env vars.
-3. Create **Service B**: Deploy from the same repo again → set **Root Directory** to `apps/n8n`. Set n8n env vars.
-4. Open both URLs: `/api/health` for editor; `/` for n8n login.
+## Deploy on Railway
+1. Create a new service from this repo.
+2. Attach a **PostgreSQL** plugin (Railway-managed DB). `DATABASE_URL` will be injected automatically.
+3. Set env vars:
+   - `EDITOR_AUTH_TOKEN` (optional, recommended)
+   - `CORS_ORIGIN` (e.g. your domain or `*` while testing)
+4. Open the service URL:
+   - `/api/health` → `{"ok":true}`
+   - `/` → PDFme Editor page
 
-See each app's README and `.env.example` for variables.
+## API
+- `GET /api/templates`, `GET /api/templates/:id`
+- `POST /api/templates`, `PUT /api/templates/:id`, `DELETE /api/templates/:id`
+- `POST /api/render` → returns a PDF (server-side using @pdfme/generator)
