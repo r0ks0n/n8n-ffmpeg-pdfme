@@ -142,7 +142,7 @@
         }
       }
 
-      // --- Helpers to Save/Update ---
+      // --- Helpers to Save/Update/Delete ---
       async function createTemplate() {
         const name = document.getElementById('tplName').value || 'Untitled Template';
         const template = designer.getTemplate();
@@ -250,12 +250,12 @@
           const t = designer.getTemplate();
           // Example inputs: 2 pages using the same layout
           const inputs = [ { title: 'Hello from PDFme' }, { title: 'Second page' } ];
-          const res = await fetch(`${API.base}/api/preview`, {
+          const res = await fetch(`${API.base}/api/render`, {
             method: 'POST',
             headers: headers(),
-            body: JSON.stringify({ template: t, inputs, fileName: 'preview.pdf' })
+            body: JSON.stringify({ template: t, inputs, fileName: 'preview' })
           });
-          if (!res.ok) return alert('Preview failed (configure N8N_PREVIEW_WEBHOOK_URL if needed)');
+          if (!res.ok) return alert('Preview failed');
           const blob = await res.blob();
           const url = URL.createObjectURL(blob);
           window.open(url, '_blank');
