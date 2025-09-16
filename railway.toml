@@ -1,3 +1,0 @@
-[service]
-root = "."
-start = "npm start"
