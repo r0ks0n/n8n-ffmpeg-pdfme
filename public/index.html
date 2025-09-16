@@ -23,6 +23,8 @@
       <button id="btnPreview">Preview</button>
       <select id="tplList"></select>
       <button id="btnLoad">Load</button>
+      <button id="btnSetToken">Set Token</button>
+      <button id="btnLogout" style="display:none">Logout</button>
     </div>
     <div id="container"></div>
 
@@ -30,33 +32,87 @@
       import { Designer } from 'https://esm.sh/@pdfme/ui@5';
       import { BLANK_PDF } from 'https://esm.sh/@pdfme/common@5';
 
+      // --- API config ---
       const API = {
         base: location.origin,
-        token: '' // optionally paste EDITOR_AUTH_TOKEN here for local manual testing
+        token: '' // will be populated from localStorage if present
       };
 
-      const headers = () => API.token ? { 'Authorization': `Bearer ${API.token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+      // --- Simple auth via localStorage token ---
+      const savedToken = localStorage.getItem('EDITOR_TOKEN') || '';
+      API.token = savedToken;
 
+      function headers() {
+        return API.token
+          ? { 'Authorization': `Bearer ${API.token}`, 'Content-Type': 'application/json' }
+          : { 'Content-Type': 'application/json' };
+      }
+
+      function updateAuthButtons() {
+        const has = !!API.token;
+        document.getElementById('btnSetToken').style.display = has ? 'none' : 'inline-block';
+        document.getElementById('btnLogout').style.display = has ? 'inline-block' : 'none';
+      }
+
+      document.getElementById('btnSetToken').onclick = async () => {
+        const t = prompt('Paste EDITOR_AUTH_TOKEN');
+        if (t && t.trim()) {
+          API.token = t.trim();
+          localStorage.setItem('EDITOR_TOKEN', API.token);
+          updateAuthButtons();
+          await refreshList();
+          alert('Token set.');
+        }
+      };
+
+      document.getElementById('btnLogout').onclick = async () => {
+        localStorage.removeItem('EDITOR_TOKEN');
+        API.token = '';
+        updateAuthButtons();
+        await refreshList();
+        alert('Logged out.');
+      };
+
+      // --- Initial template (1 page with a single text field) ---
       const initialTemplate = {
         basePdf: BLANK_PDF,
-        schemas: [[ { name: 'title', type: 'text', position: { x: 20, y: 20 }, width: 170, height: 15 } ]]
+        // schemas is an array of pages; each page is an array of schema objects
+        schemas: [[
+          { name: 'title', type: 'text', position: { x: 20, y: 20 }, width: 170, height: 15 }
+        ]]
       };
 
+      // --- Mount Designer ---
       const container = document.getElementById('container');
-      const designer = new Designer({ domContainer: container, template: initialTemplate, options: { zoomLevel: 1 } });
+      const designer = new Designer({
+        domContainer: container,
+        template: initialTemplate,
+        options: { zoomLevel: 1 }
+      });
 
+      // --- Load list of templates from API ---
       async function refreshList() {
-        const res = await fetch(`${API.base}/api/templates`, { headers: headers() });
-        const list = await res.json();
-        const select = document.getElementById('tplList');
-        select.innerHTML = '';
-        for (const r of list) {
-          const opt = document.createElement('option');
-          opt.value = r.id; opt.textContent = `${r.name} — ${r.id}`;
-          select.appendChild(opt);
+        try {
+          const res = await fetch(`${API.base}/api/templates`, { headers: headers() });
+          if (!res.ok) {
+            console.warn('Template list failed', res.status);
+            document.getElementById('tplList').innerHTML = '';
+            return;
+          }
+          const list = await res.json();
+          const select = document.getElementById('tplList');
+          select.innerHTML = '';
+          for (const r of list) {
+            const opt = document.createElement('option');
+            opt.value = r.id; opt.textContent = `${r.name} — ${r.id}`;
+            select.appendChild(opt);
+          }
+        } catch (e) {
+          console.error(e);
         }
       }
 
+      // --- UI handlers ---
       document.getElementById('btnNew').onclick = () => {
         designer.updateTemplate(initialTemplate);
         document.getElementById('tplName').value = '';
@@ -66,7 +122,9 @@
         const name = document.getElementById('tplName').value || 'Untitled Template';
         const template = designer.getTemplate();
         const res = await fetch(`${API.base}/api/templates`, {
-          method: 'POST', headers: headers(), body: JSON.stringify({ name, template })
+          method: 'POST',
+          headers: headers(),
+          body: JSON.stringify({ name, template })
         });
         if (!res.ok) return alert('Save failed');
         alert('Saved!');
@@ -85,17 +143,25 @@
       document.getElementById('btnPreview').onclick = async () => {
         try {
           const t = designer.getTemplate();
+          // Example inputs: 2 pages using the same layout
           const inputs = [ { title: 'Hello from PDFme' }, { title: 'Second page' } ];
           const res = await fetch(`${API.base}/api/preview`, {
-            method: 'POST', headers: headers(), body: JSON.stringify({ template: t, inputs, fileName: 'preview.pdf' })
+            method: 'POST',
+            headers: headers(),
+            body: JSON.stringify({ template: t, inputs, fileName: 'preview.pdf' })
           });
           if (!res.ok) return alert('Preview failed (configure N8N_PREVIEW_WEBHOOK_URL if needed)');
           const blob = await res.blob();
           const url = URL.createObjectURL(blob);
           window.open(url, '_blank');
-        } catch (e) { console.error(e); alert('Preview error'); }
+        } catch (e) {
+          console.error(e);
+          alert('Preview error');
+        }
       };
 
+      // --- Init ---
+      updateAuthButtons();
       refreshList();
     </script>
   </body>
