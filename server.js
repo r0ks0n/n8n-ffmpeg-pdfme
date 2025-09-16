@@ -15,6 +15,17 @@ app.use(cors({ origin: CORS_ORIGIN, credentials: false }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
+// ---- TEMP request logger (za debug) ----
+app.use((req, _res, next) => {
+  console.log('[REQ]', req.method, req.url);
+  next();
+});
+
+// Če nekdo zadene GET /api/render, vrnemo 405 da jasno vidimo metodo
+app.get('/api/render', (_req, res) => {
+  res.status(405).json({ error: 'Use POST /api/render' });
+});
+
 // ---- Postgres ----
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
