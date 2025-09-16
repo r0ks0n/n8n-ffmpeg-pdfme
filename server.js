@@ -92,5 +92,11 @@ app.post('/api/preview', auth, async (req, res) => {
   }
 });
 
+app.delete('/api/templates/:id', auth, async (req, res) => {
+  const { rowCount } = await pool.query('DELETE FROM templates WHERE id = $1', [req.params.id]);
+  if (rowCount === 0) return res.status(404).json({ error: 'Not found' });
+  return res.status(204).send();
+});
+
 await initDb();
 app.listen(port, () => console.log(`PDFme Editor running on :${port}`));
