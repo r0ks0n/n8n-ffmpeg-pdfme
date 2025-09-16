@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>PDFme Editor (Railway)</title>
+    <style>
+      html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      #topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; background: #fff; z-index: 5; }
+      #container { height: calc(100% - 50px); }
+      button { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; cursor: pointer; }
+      input, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 8px; }
+      .spacer { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <div id="topbar">
+      <strong>PDFme Editor</strong>
+      <span class="spacer"></span>
+      <input id="tplName" placeholder="Template name" />
+      <button id="btnNew">New</button>
+      <button id="btnSave">Save</button>
+      <button id="btnPreview">Preview</button>
+      <select id="tplList"></select>
+      <button id="btnLoad">Load</button>
+    </div>
+    <div id="container"></div>
+
+    <script type="module">
+      import { Designer } from 'https://esm.sh/@pdfme/ui@5';
+      import { BLANK_PDF } from 'https://esm.sh/@pdfme/common@5';
+
+      const API = {
+        base: location.origin,
+        token: '' // optionally paste EDITOR_AUTH_TOKEN here for local manual testing
+      };
+
+      const headers = () => API.token ? { 'Authorization': `Bearer ${API.token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+
+      const initialTemplate = {
+        basePdf: BLANK_PDF,
+        schemas: [[ { name: 'title', type: 'text', position: { x: 20, y: 20 }, width: 170, height: 15 } ]]
+      };
+
+      const container = document.getElementById('container');
+      const designer = new Designer({ domContainer: container, template: initialTemplate, options: { zoomLevel: 1 } });
+
+      async function refreshList() {
+        const res = await fetch(`${API.base}/api/templates`, { headers: headers() });
+        const list = await res.json();
+        const select = document.getElementById('tplList');
+        select.innerHTML = '';
+        for (const r of list) {
+          const opt = document.createElement('option');
+          opt.value = r.id; opt.textContent = `${r.name} — ${r.id}`;
+          select.appendChild(opt);
+        }
+      }
+
+      document.getElementById('btnNew').onclick = () => {
+        designer.updateTemplate(initialTemplate);
+        document.getElementById('tplName').value = '';
+      };
+
+      document.getElementById('btnSave').onclick = async () => {
+        const name = document.getElementById('tplName').value || 'Untitled Template';
+        const template = designer.getTemplate();
+        const res = await fetch(`${API.base}/api/templates`, {
+          method: 'POST', headers: headers(), body: JSON.stringify({ name, template })
+        });
+        if (!res.ok) return alert('Save failed');
+        alert('Saved!');
+        refreshList();
+      };
+
+      document.getElementById('btnLoad').onclick = async () => {
+        const id = document.getElementById('tplList').value; if (!id) return;
+        const res = await fetch(`${API.base}/api/templates/${id}`, { headers: headers() });
+        if (!res.ok) return alert('Load failed');
+        const { name, template } = await res.json();
+        document.getElementById('tplName').value = name;
+        designer.updateTemplate(template);
+      };
+
+      document.getElementById('btnPreview').onclick = async () => {
+        try {
+          const t = designer.getTemplate();
+          const inputs = [ { title: 'Hello from PDFme' }, { title: 'Second page' } ];
+          const res = await fetch(`${API.base}/api/preview`, {
+            method: 'POST', headers: headers(), body: JSON.stringify({ template: t, inputs, fileName: 'preview.pdf' })
+          });
+          if (!res.ok) return alert('Preview failed (configure N8N_PREVIEW_WEBHOOK_URL if needed)');
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          window.open(url, '_blank');
+        } catch (e) { console.error(e); alert('Preview error'); }
+      };
+
+      refreshList();
+    </script>
+  </body>
+</html>
