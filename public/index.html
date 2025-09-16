@@ -26,6 +26,7 @@
       <button id="btnNew">New</button>
       <button id="btnSave">Save</button>
       <button id="btnSaveAs">Save As</button>
+      <button id="btnDelete" style="background:#fff5f5;border-color:#f5c2c2">Delete</button>
       <button id="btnPreview">Preview</button>
 
       <select id="tplList" style="min-width:320px"></select>
@@ -170,6 +171,16 @@
         return obj;
       }
 
+      async function deleteTemplate(id) {
+        const res = await fetch(`${API.base}/api/templates/${id}`, {
+          method: 'DELETE',
+          headers: headers()
+        });
+        if (res.status === 204) return true;
+        if (res.status === 404) throw new Error('Template not found');
+        throw new Error('Delete failed');
+      }
+
       // --- UI handlers ---
       document.getElementById('btnNew').onclick = () => {
         designer.updateTemplate(initialTemplate);
@@ -213,6 +224,25 @@
         document.getElementById('tplName').value = name;
         designer.updateTemplate(template);
         setCurrentId(loadedId || id);
+      };
+
+      document.getElementById('btnDelete').onclick = async () => {
+        try {
+          if (!currentId) return alert('Ni izbranega template-a (Current ID je prazen).');
+          const currentName = document.getElementById('tplName').value || '(unnamed)';
+          const sure = confirm(`Res želiš izbrisati template?\n\nName: ${currentName}\nID: ${currentId}`);
+          if (!sure) return;
+          await deleteTemplate(currentId);
+          // reset UI
+          setCurrentId(null);
+          document.getElementById('tplName').value = '';
+          designer.updateTemplate(initialTemplate);
+          await refreshList();
+          alert('Deleted.');
+        } catch (e) {
+          console.error(e);
+          alert(e.message || 'Delete failed');
+        }
       };
 
       document.getElementById('btnPreview').onclick = async () => {
