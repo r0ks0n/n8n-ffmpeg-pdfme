@@ -6,32 +6,42 @@
     <title>PDFme Editor (Railway)</title>
     <style>
       html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+      /* TOPBAR = 1. vrstica: Name + akcije */
       #topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; background: #fff; z-index: 5; flex-wrap: wrap; }
-      #panel { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; background: #fafafa; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-      #container { height: calc(100% - 170px); }
-      button { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; cursor: pointer; }
-      input, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 8px; }
-      .spacer { flex: 1; }
-      .muted { color: #6b7280; font-size: 12px; }
-      #currentId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-      .group { display: flex; flex-direction: column; gap: 8px; }
-      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      #nameWrap { display: flex; align-items: center; gap: 8px; }
+      #tplName { min-width: 260px; }
+      /* SUBBAR = 2. vrstica: Base PDFs v ENI vrstici */
+      #subbar { display: flex; gap: 16px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; background: #fafafa; flex-wrap: wrap; }
+      .baseGroup { display: flex; align-items: center; gap: 8px; }
+      .label { font-size: 13px; color: #374151; min-width: 90px; }
       .badge { font-size: 12px; padding: 2px 6px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 999px; }
       .warn  { background: #fff7ed; border-color: #fed7aa; }
       .good  { background: #ecfdf5; border-color: #bbf7d0; }
       .filehint { font-size: 12px; color: #6b7280; }
+      .spacer { flex: 1; }
+      .muted { color: #6b7280; font-size: 12px; }
+      #container { height: calc(100% - 116px); } /* topbar (48) + subbar (68) ~> prilagodi po potrebi */
+      button { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; cursor: pointer; }
+      input, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 8px; }
     </style>
   </head>
   <body>
+    <!-- TOP vrstica: name + akcije + lista -->
     <div id="topbar">
       <strong>PDFme Editor</strong>
-      <span class="spacer"></span>
+
+      <div id="nameWrap">
+        <span class="label">Name:</span>
+        <input id="tplName" placeholder="Template name" />
+      </div>
 
       <button id="btnNew">New</button>
       <button id="btnSave">Save</button>
       <button id="btnSaveAs">Save As</button>
       <button id="btnDelete" style="background:#fff5f5;border-color:#f5c2c2">Delete</button>
       <button id="btnPreview">Preview</button>
+
+      <span class="spacer"></span>
 
       <select id="tplList" style="min-width:320px"></select>
       <button id="btnLoad">Load</button>
@@ -42,37 +52,27 @@
       <div class="muted">Current ID: <span id="currentId">(none)</span></div>
     </div>
 
-    <div id="panel">
-      <div class="group">
-        <div class="row">
-          <label style="min-width:110px">Name:</label>
-          <input id="tplName" placeholder="Template name" style="min-width:220px" />
-        </div>
+    <!-- Druga vrstica: OBA base PDF kontrolnika v ENI vrstici -->
+    <div id="subbar">
+      <div class="baseGroup">
+        <span class="label">Page 1 base:</span>
+        <input type="file" id="base1File" accept="application/pdf" />
+        <button id="btnBase1Upload">Upload</button>
+        <button id="btnBase1Clear">Clear</button>
+        <button id="btnBase1Download">Download</button>
+        <span id="base1Status" class="badge warn">not set</span>
       </div>
 
-      <div class="group">
-        <div class="row"><strong>Base PDFs</strong></div>
-
-        <div class="row">
-          <div style="min-width:110px">Page 1 base:</div>
-          <input type="file" id="base1File" accept="application/pdf" />
-          <button id="btnBase1Upload">Upload</button>
-          <button id="btnBase1Clear">Clear</button>
-          <button id="btnBase1Download">Download</button>
-          <span id="base1Status" class="badge warn">not set</span>
-        </div>
-        <div class="filehint">Uporabi obstoječi PDF kot ozadje za <strong>prvo stran</strong>.</div>
-
-        <div class="row" style="margin-top:6px">
-          <div style="min-width:110px">Page 2+ base:</div>
-          <input type="file" id="base2File" accept="application/pdf" />
-          <button id="btnBase2Upload">Upload</button>
-          <button id="btnBase2Clear">Clear</button>
-          <button id="btnBase2Download">Download</button>
-          <span id="base2Status" class="badge warn">not set</span>
-        </div>
-        <div class="filehint">Če dokument preseže 1 stran, se na <strong>vseh naslednjih straneh</strong> uporabi ta base PDF.</div>
+      <div class="baseGroup">
+        <span class="label">Page 2+ base:</span>
+        <input type="file" id="base2File" accept="application/pdf" />
+        <button id="btnBase2Upload">Upload</button>
+        <button id="btnBase2Clear">Clear</button>
+        <button id="btnBase2Download">Download</button>
+        <span id="base2Status" class="badge warn">not set</span>
       </div>
+
+      <div class="filehint">Če dokument preseže 1 stran, se na vseh naslednjih straneh uporabi Page&nbsp;2+ base.</div>
     </div>
 
     <div id="container"></div>
@@ -80,10 +80,20 @@
     <script type="module">
       import { Designer } from 'https://esm.sh/@pdfme/ui@5';
       import { BLANK_PDF } from 'https://esm.sh/@pdfme/common@5';
+      import * as schemas from 'https://esm.sh/@pdfme/schemas@5';
+
+      // --- Plugins: VSE vgrajene sheme ---
+      const plugins = {
+        text: schemas.text,
+        image: schemas.image,
+        rect: schemas.rect,
+        line: schemas.line,
+        table: schemas.table,
+        barcode: schemas.barcode, // vsebuje qrcode, code128, ean13, ...
+      };
 
       // --- API config & auth ---
       const API = { base: location.origin, token: localStorage.getItem('EDITOR_TOKEN') || '' };
-
       function headers() {
         return API.token
           ? { 'Authorization': `Bearer ${API.token}`, 'Content-Type': 'application/json' }
@@ -126,7 +136,7 @@
         }
       }
 
-      // --- Initial template ---
+      // --- Initial template (zdaj z vsemi shemami na voljo v toolbaru) ---
       const initialTemplate = {
         basePdf: BLANK_PDF,
         schemas: [[
@@ -151,15 +161,20 @@
         el.className = 'badge ' + (has ? 'good' : 'warn');
       }
 
-      // --- Mount Designer ---
+      // --- Mount Designer (z vsemi plugini) ---
       const container = document.getElementById('container');
-      const designer = new Designer({ domContainer: container, template: initialTemplate, options: { zoomLevel: 1 } });
+      const designer = new Designer({
+        domContainer: container,
+        template: initialTemplate,
+        plugins,
+        options: { zoomLevel: 1 }
+      });
 
       // --- Template list ---
       async function refreshList() {
         try {
           const res = await fetch(`${API.base}/api/templates`, { headers: headers() });
-        if (!res.ok) {
+          if (!res.ok) {
             console.warn('Template list failed', res.status);
             document.getElementById('tplList').innerHTML = '';
             return;
@@ -292,7 +307,7 @@
         if (!f) return alert('Izberi PDF datoteko.');
         const dataUrl = await fileToDataUrl(f);
         const tpl = designer.getTemplate();
-        tpl.basePdf = dataUrl; // pdfme podpira string dataURL
+        tpl.basePdf = dataUrl;
         designer.updateTemplate(tpl);
         setBaseStatus(1, true);
         alert('Base PDF (page 1) set.');
