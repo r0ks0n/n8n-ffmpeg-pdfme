@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="sl">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -7,21 +7,25 @@
     <style>
       html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
       #topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; background: #fff; z-index: 5; flex-wrap: wrap; }
-      #container { height: calc(100% - 60px); }
+      #panel { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; background: #fafafa; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      #container { height: calc(100% - 170px); }
       button { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; cursor: pointer; }
       input, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 8px; }
       .spacer { flex: 1; }
       .muted { color: #6b7280; font-size: 12px; }
       #currentId { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+      .group { display: flex; flex-direction: column; gap: 8px; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .badge { font-size: 12px; padding: 2px 6px; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 999px; }
+      .warn  { background: #fff7ed; border-color: #fed7aa; }
+      .good  { background: #ecfdf5; border-color: #bbf7d0; }
+      .filehint { font-size: 12px; color: #6b7280; }
     </style>
   </head>
   <body>
     <div id="topbar">
       <strong>PDFme Editor</strong>
       <span class="spacer"></span>
-
-      <label class="muted">Name:</label>
-      <input id="tplName" placeholder="Template name" style="min-width:220px" />
 
       <button id="btnNew">New</button>
       <button id="btnSave">Save</button>
@@ -38,34 +42,58 @@
       <div class="muted">Current ID: <span id="currentId">(none)</span></div>
     </div>
 
+    <div id="panel">
+      <div class="group">
+        <div class="row">
+          <label style="min-width:110px">Name:</label>
+          <input id="tplName" placeholder="Template name" style="min-width:220px" />
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="row"><strong>Base PDFs</strong></div>
+
+        <div class="row">
+          <div style="min-width:110px">Page 1 base:</div>
+          <input type="file" id="base1File" accept="application/pdf" />
+          <button id="btnBase1Upload">Upload</button>
+          <button id="btnBase1Clear">Clear</button>
+          <button id="btnBase1Download">Download</button>
+          <span id="base1Status" class="badge warn">not set</span>
+        </div>
+        <div class="filehint">Uporabi obstoječi PDF kot ozadje za <strong>prvo stran</strong>.</div>
+
+        <div class="row" style="margin-top:6px">
+          <div style="min-width:110px">Page 2+ base:</div>
+          <input type="file" id="base2File" accept="application/pdf" />
+          <button id="btnBase2Upload">Upload</button>
+          <button id="btnBase2Clear">Clear</button>
+          <button id="btnBase2Download">Download</button>
+          <span id="base2Status" class="badge warn">not set</span>
+        </div>
+        <div class="filehint">Če dokument preseže 1 stran, se na <strong>vseh naslednjih straneh</strong> uporabi ta base PDF.</div>
+      </div>
+    </div>
+
     <div id="container"></div>
 
     <script type="module">
       import { Designer } from 'https://esm.sh/@pdfme/ui@5';
       import { BLANK_PDF } from 'https://esm.sh/@pdfme/common@5';
 
-      // --- API config ---
-      const API = {
-        base: location.origin,
-        token: '' // will be populated from localStorage if present
-      };
-
-      // --- Simple auth via localStorage token ---
-      const savedToken = localStorage.getItem('EDITOR_TOKEN') || '';
-      API.token = savedToken;
+      // --- API config & auth ---
+      const API = { base: location.origin, token: localStorage.getItem('EDITOR_TOKEN') || '' };
 
       function headers() {
         return API.token
           ? { 'Authorization': `Bearer ${API.token}`, 'Content-Type': 'application/json' }
           : { 'Content-Type': 'application/json' };
       }
-
       function updateAuthButtons() {
         const has = !!API.token;
         document.getElementById('btnSetToken').style.display = has ? 'none' : 'inline-block';
         document.getElementById('btnLogout').style.display = has ? 'inline-block' : 'none';
       }
-
       document.getElementById('btnSetToken').onclick = async () => {
         const t = prompt('Paste EDITOR_AUTH_TOKEN');
         if (t && t.trim()) {
@@ -76,7 +104,6 @@
           alert('Token set.');
         }
       };
-
       document.getElementById('btnLogout').onclick = async () => {
         localStorage.removeItem('EDITOR_TOKEN');
         API.token = '';
@@ -85,12 +112,13 @@
         alert('Logged out.');
       };
 
-      // --- Track current loaded template ID ---
+      // --- State: current ID + second base pdf (za 2+ strani) ---
       let currentId = null;
+      let secondBasePdf = null; // dataURL ali null
+
       function setCurrentId(id) {
         currentId = id || null;
         document.getElementById('currentId').textContent = currentId || '(none)';
-        // Also try to select it in dropdown if present
         const sel = document.getElementById('tplList');
         if (currentId) {
           const opt = [...sel.options].find(o => o.value === currentId);
@@ -98,28 +126,40 @@
         }
       }
 
-      // --- Initial template (1 page with a single text field) ---
+      // --- Initial template ---
       const initialTemplate = {
         basePdf: BLANK_PDF,
-        // schemas is an array of pages; each page is an array of schema objects
         schemas: [[
           { name: 'title', type: 'text', position: { x: 20, y: 20 }, width: 170, height: 15 }
         ]]
       };
 
+      // --- Base PDF helpers ---
+      async function fileToDataUrl(file) {
+        const buf = await file.arrayBuffer();
+        const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+        return `data:application/pdf;base64,${b64}`;
+      }
+      function downloadDataUrlAs(name, dataUrl) {
+        const a = document.createElement('a');
+        a.href = dataUrl; a.download = name || 'base.pdf';
+        document.body.appendChild(a); a.click(); a.remove();
+      }
+      function setBaseStatus(which, has) {
+        const el = document.getElementById(which === 1 ? 'base1Status' : 'base2Status');
+        el.textContent = has ? 'set' : 'not set';
+        el.className = 'badge ' + (has ? 'good' : 'warn');
+      }
+
       // --- Mount Designer ---
       const container = document.getElementById('container');
-      const designer = new Designer({
-        domContainer: container,
-        template: initialTemplate,
-        options: { zoomLevel: 1 }
-      });
+      const designer = new Designer({ domContainer: container, template: initialTemplate, options: { zoomLevel: 1 } });
 
-      // --- Load list of templates from API ---
+      // --- Template list ---
       async function refreshList() {
         try {
           const res = await fetch(`${API.base}/api/templates`, { headers: headers() });
-          if (!res.ok) {
+        if (!res.ok) {
             console.warn('Template list failed', res.status);
             document.getElementById('tplList').innerHTML = '';
             return;
@@ -132,27 +172,23 @@
             opt.value = r.id; opt.textContent = `${r.name} — ${r.id}`;
             select.appendChild(opt);
           }
-          // try keep selection on currentId
           if (currentId) {
             const opt = [...select.options].find(o => o.value === currentId);
             if (opt) select.value = currentId;
           }
-        } catch (e) {
-          console.error(e);
-        }
+        } catch (e) { console.error(e); }
       }
 
-      // --- Helpers to Save/Update/Delete ---
+      // --- CRUD helpers ---
       async function createTemplate() {
         const name = document.getElementById('tplName').value || 'Untitled Template';
         const template = designer.getTemplate();
+        if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
         const res = await fetch(`${API.base}/api/templates`, {
-          method: 'POST',
-          headers: headers(),
-          body: JSON.stringify({ name, template })
+          method: 'POST', headers: headers(), body: JSON.stringify({ name, template })
         });
         if (!res.ok) throw new Error('Create failed');
-        const obj = await res.json(); // { id, name, template, ...}
+        const obj = await res.json();
         setCurrentId(obj.id);
         return obj;
       }
@@ -160,10 +196,9 @@
       async function updateTemplate(id) {
         const name = document.getElementById('tplName').value || 'Untitled Template';
         const template = designer.getTemplate();
+        if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
         const res = await fetch(`${API.base}/api/templates/${id}`, {
-          method: 'PUT',
-          headers: headers(),
-          body: JSON.stringify({ name, template })
+          method: 'PUT', headers: headers(), body: JSON.stringify({ name, template })
         });
         if (!res.ok) throw new Error('Update failed');
         const obj = await res.json();
@@ -172,48 +207,37 @@
       }
 
       async function deleteTemplate(id) {
-        const res = await fetch(`${API.base}/api/templates/${id}`, {
-          method: 'DELETE',
-          headers: headers()
-        });
+        const res = await fetch(`${API.base}/api/templates/${id}`, { method: 'DELETE', headers: headers() });
         if (res.status === 204) return true;
         if (res.status === 404) throw new Error('Template not found');
         throw new Error('Delete failed');
       }
 
-      // --- UI handlers ---
+      // --- Topbar handlers ---
       document.getElementById('btnNew').onclick = () => {
         designer.updateTemplate(initialTemplate);
         document.getElementById('tplName').value = '';
-        setCurrentId(null); // new template, no ID yet
+        secondBasePdf = null;
+        setBaseStatus(1, false);
+        setBaseStatus(2, false);
+        setCurrentId(null);
       };
 
       document.getElementById('btnSave').onclick = async () => {
         try {
-          if (currentId) {
-            await updateTemplate(currentId);  // UPDATE existing
-          } else {
-            await createTemplate();           // CREATE new
-          }
+          if (currentId) await updateTemplate(currentId); else await createTemplate();
           await refreshList();
           alert('Saved!');
-        } catch (e) {
-          console.error(e);
-          alert(e.message || 'Save failed');
-        }
+        } catch (e) { console.error(e); alert(e.message || 'Save failed'); }
       };
 
       document.getElementById('btnSaveAs').onclick = async () => {
         try {
-          // Save As => always create a new one, independent of currentId
           setCurrentId(null);
           await createTemplate();
           await refreshList();
           alert('Saved as new template!');
-        } catch (e) {
-          console.error(e);
-          alert(e.message || 'Save As failed');
-        }
+        } catch (e) { console.error(e); alert(e.message || 'Save As failed'); }
       };
 
       document.getElementById('btnLoad').onclick = async () => {
@@ -223,6 +247,9 @@
         const { name, template, id: loadedId } = await res.json();
         document.getElementById('tplName').value = name;
         designer.updateTemplate(template);
+        secondBasePdf = typeof template._secondBasePdf === 'string' ? template._secondBasePdf : null;
+        setBaseStatus(1, typeof template.basePdf === 'string');
+        setBaseStatus(2, !!secondBasePdf);
         setCurrentId(loadedId || id);
       };
 
@@ -233,41 +260,85 @@
           const sure = confirm(`Res želiš izbrisati template?\n\nName: ${currentName}\nID: ${currentId}`);
           if (!sure) return;
           await deleteTemplate(currentId);
-          // reset UI
           setCurrentId(null);
           document.getElementById('tplName').value = '';
           designer.updateTemplate(initialTemplate);
+          secondBasePdf = null;
+          setBaseStatus(1, false);
+          setBaseStatus(2, false);
           await refreshList();
           alert('Deleted.');
-        } catch (e) {
-          console.error(e);
-          alert(e.message || 'Delete failed');
-        }
+        } catch (e) { console.error(e); alert(e.message || 'Delete failed'); }
       };
 
       document.getElementById('btnPreview').onclick = async () => {
         try {
           const t = designer.getTemplate();
-          // Example inputs: 2 pages using the same layout
+          if (secondBasePdf) t._secondBasePdf = secondBasePdf; else delete t._secondBasePdf;
           const inputs = [ { title: 'Hello from PDFme' }, { title: 'Second page' } ];
           const res = await fetch(`${API.base}/api/render`, {
-            method: 'POST',
-            headers: headers(),
-            body: JSON.stringify({ template: t, inputs, fileName: 'preview' })
+            method: 'POST', headers: headers(), body: JSON.stringify({ template: t, inputs, fileName: 'preview' })
           });
           if (!res.ok) return alert('Preview failed');
           const blob = await res.blob();
           const url = URL.createObjectURL(blob);
           window.open(url, '_blank');
-        } catch (e) {
-          console.error(e);
-          alert('Preview error');
+        } catch (e) { console.error(e); alert('Preview error'); }
+      };
+
+      // --- Base PDF buttons ---
+      document.getElementById('btnBase1Upload').onclick = async () => {
+        const f = document.getElementById('base1File').files?.[0];
+        if (!f) return alert('Izberi PDF datoteko.');
+        const dataUrl = await fileToDataUrl(f);
+        const tpl = designer.getTemplate();
+        tpl.basePdf = dataUrl; // pdfme podpira string dataURL
+        designer.updateTemplate(tpl);
+        setBaseStatus(1, true);
+        alert('Base PDF (page 1) set.');
+      };
+      document.getElementById('btnBase1Clear').onclick = () => {
+        const tpl = designer.getTemplate();
+        tpl.basePdf = BLANK_PDF;
+        designer.updateTemplate(tpl);
+        setBaseStatus(1, false);
+      };
+      document.getElementById('btnBase1Download').onclick = () => {
+        const tpl = designer.getTemplate();
+        if (typeof tpl.basePdf === 'string') {
+          const name = (document.getElementById('tplName').value || 'template') + '_base_page1.pdf';
+          downloadDataUrlAs(name, tpl.basePdf);
+        } else {
+          alert('Ni nastavljenega Base PDF (page 1).');
+        }
+      };
+
+      document.getElementById('btnBase2Upload').onclick = async () => {
+        const f = document.getElementById('base2File').files?.[0];
+        if (!f) return alert('Izberi PDF datoteko.');
+        secondBasePdf = await fileToDataUrl(f);
+        setBaseStatus(2, true);
+        alert('Second-page Base PDF set.');
+      };
+      document.getElementById('btnBase2Clear').onclick = () => {
+        secondBasePdf = null;
+        setBaseStatus(2, false);
+      };
+      document.getElementById('btnBase2Download').onclick = () => {
+        if (secondBasePdf) {
+          const name = (document.getElementById('tplName').value || 'template') + '_base_page2plus.pdf';
+          downloadDataUrlAs(name, secondBasePdf);
+        } else {
+          alert('Ni nastavljenega Second-page Base PDF.');
         }
       };
 
       // --- Init ---
       updateAuthButtons();
       setCurrentId(null);
+      setBaseStatus(1, false);
+      setBaseStatus(2, false);
+      document.getElementById('tplName').value = '';
       refreshList();
     </script>
   </body>
