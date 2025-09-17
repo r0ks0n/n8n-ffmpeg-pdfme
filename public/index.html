@@ -20,13 +20,16 @@
       .filehint { font-size: 12px; color: #6b7280; }
       .spacer { flex: 1; }
       .muted { color: #6b7280; font-size: 12px; }
-      #container { height: calc(100% - 116px); } /* topbar (48) + subbar (68) ~> prilagodi po potrebi */
+      #container { height: calc(100% - 116px); }
       button { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; cursor: pointer; }
       input, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 8px; }
+      #err { display:none; padding:10px 12px; color:#991b1b; background:#fef2f2; border:1px solid #fecaca; }
     </style>
   </head>
   <body>
-    <!-- TOP vrstica: name + akcije + lista -->
+    <div id="err"></div>
+
+    <!-- TOP vrstica -->
     <div id="topbar">
       <strong>PDFme Editor</strong>
 
@@ -52,7 +55,7 @@
       <div class="muted">Current ID: <span id="currentId">(none)</span></div>
     </div>
 
-    <!-- Druga vrstica: OBA base PDF kontrolnika v ENI vrstici -->
+    <!-- Druga vrstica -->
     <div id="subbar">
       <div class="baseGroup">
         <span class="label">Page 1 base:</span>
@@ -78,283 +81,299 @@
     <div id="container"></div>
 
     <script type="module">
-      import { Designer } from 'https://esm.sh/@pdfme/ui@5';
-      import { BLANK_PDF } from 'https://esm.sh/@pdfme/common@5';
-      import * as schemas from 'https://esm.sh/@pdfme/schemas@5';
+      // -------- robusten import (bundlano) --------
+      const uiMod     = await import('https://esm.sh/@pdfme/ui@5?target=es2020&bundle');
+      const commonMod = await import('https://esm.sh/@pdfme/common@5?target=es2020&bundle');
+      // @pdfme/schemas kot bundlan namespace (včasih je težava, če ni bundlano)
+      const schMod    = await import('https://esm.sh/@pdfme/schemas@5?target=es2020&bundle');
 
-      // --- Plugins: VSE vgrajene sheme ---
+      const { Designer } = uiMod;
+      const { BLANK_PDF } = commonMod;
+
+      // Vsi plugin-i
       const plugins = {
-        text: schemas.text,
-        image: schemas.image,
-        rect: schemas.rect,
-        line: schemas.line,
-        table: schemas.table,
-        barcode: schemas.barcode, // vsebuje qrcode, code128, ean13, ...
+        text: schMod.text,
+        image: schMod.image,
+        rect: schMod.rect,
+        line: schMod.line,
+        table: schMod.table,
+        barcode: schMod.barcode, // qrcode, code128, ean13, ...
       };
 
-      // --- API config & auth ---
-      const API = { base: location.origin, token: localStorage.getItem('EDITOR_TOKEN') || '' };
-      function headers() {
-        return API.token
-          ? { 'Authorization': `Bearer ${API.token}`, 'Content-Type': 'application/json' }
-          : { 'Content-Type': 'application/json' };
+      // --- mini helper za prikaz napak ---
+      function showErr(e) {
+        const box = document.getElementById('err');
+        box.style.display = 'block';
+        box.textContent = 'Error: ' + (e?.message || e);
+        console.error(e);
       }
-      function updateAuthButtons() {
-        const has = !!API.token;
-        document.getElementById('btnSetToken').style.display = has ? 'none' : 'inline-block';
-        document.getElementById('btnLogout').style.display = has ? 'inline-block' : 'none';
-      }
-      document.getElementById('btnSetToken').onclick = async () => {
-        const t = prompt('Paste EDITOR_AUTH_TOKEN');
-        if (t && t.trim()) {
-          API.token = t.trim();
-          localStorage.setItem('EDITOR_TOKEN', API.token);
+
+      try {
+        // --- API config & auth ---
+        const API = { base: location.origin, token: localStorage.getItem('EDITOR_TOKEN') || '' };
+        function headers() {
+          return API.token
+            ? { 'Authorization': `Bearer ${API.token}`, 'Content-Type': 'application/json' }
+            : { 'Content-Type': 'application/json' };
+        }
+        function updateAuthButtons() {
+          const has = !!API.token;
+          document.getElementById('btnSetToken').style.display = has ? 'none' : 'inline-block';
+          document.getElementById('btnLogout').style.display = has ? 'inline-block' : 'none';
+        }
+        document.getElementById('btnSetToken').onclick = async () => {
+          const t = prompt('Paste EDITOR_AUTH_TOKEN');
+          if (t && t.trim()) {
+            API.token = t.trim();
+            localStorage.setItem('EDITOR_TOKEN', API.token);
+            updateAuthButtons();
+            await refreshList();
+            alert('Token set.');
+          }
+        };
+        document.getElementById('btnLogout').onclick = async () => {
+          localStorage.removeItem('EDITOR_TOKEN');
+          API.token = '';
           updateAuthButtons();
           await refreshList();
-          alert('Token set.');
-        }
-      };
-      document.getElementById('btnLogout').onclick = async () => {
-        localStorage.removeItem('EDITOR_TOKEN');
-        API.token = '';
-        updateAuthButtons();
-        await refreshList();
-        alert('Logged out.');
-      };
+          alert('Logged out.');
+        };
 
-      // --- State: current ID + second base pdf (za 2+ strani) ---
-      let currentId = null;
-      let secondBasePdf = null; // dataURL ali null
-
-      function setCurrentId(id) {
-        currentId = id || null;
-        document.getElementById('currentId').textContent = currentId || '(none)';
-        const sel = document.getElementById('tplList');
-        if (currentId) {
-          const opt = [...sel.options].find(o => o.value === currentId);
-          if (opt) sel.value = currentId;
-        }
-      }
-
-      // --- Initial template (zdaj z vsemi shemami na voljo v toolbaru) ---
-      const initialTemplate = {
-        basePdf: BLANK_PDF,
-        schemas: [[
-          { name: 'title', type: 'text', position: { x: 20, y: 20 }, width: 170, height: 15 }
-        ]]
-      };
-
-      // --- Base PDF helpers ---
-      async function fileToDataUrl(file) {
-        const buf = await file.arrayBuffer();
-        const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-        return `data:application/pdf;base64,${b64}`;
-      }
-      function downloadDataUrlAs(name, dataUrl) {
-        const a = document.createElement('a');
-        a.href = dataUrl; a.download = name || 'base.pdf';
-        document.body.appendChild(a); a.click(); a.remove();
-      }
-      function setBaseStatus(which, has) {
-        const el = document.getElementById(which === 1 ? 'base1Status' : 'base2Status');
-        el.textContent = has ? 'set' : 'not set';
-        el.className = 'badge ' + (has ? 'good' : 'warn');
-      }
-
-      // --- Mount Designer (z vsemi plugini) ---
-      const container = document.getElementById('container');
-      const designer = new Designer({
-        domContainer: container,
-        template: initialTemplate,
-        plugins,
-        options: { zoomLevel: 1 }
-      });
-
-      // --- Template list ---
-      async function refreshList() {
-        try {
-          const res = await fetch(`${API.base}/api/templates`, { headers: headers() });
-          if (!res.ok) {
-            console.warn('Template list failed', res.status);
-            document.getElementById('tplList').innerHTML = '';
-            return;
-          }
-          const list = await res.json();
-          const select = document.getElementById('tplList');
-          select.innerHTML = '';
-          for (const r of list) {
-            const opt = document.createElement('option');
-            opt.value = r.id; opt.textContent = `${r.name} — ${r.id}`;
-            select.appendChild(opt);
-          }
+        // --- State ---
+        let currentId = null;
+        let secondBasePdf = null; // dataURL ali null
+        function setCurrentId(id) {
+          currentId = id || null;
+          document.getElementById('currentId').textContent = currentId || '(none)';
+          const sel = document.getElementById('tplList');
           if (currentId) {
-            const opt = [...select.options].find(o => o.value === currentId);
-            if (opt) select.value = currentId;
+            const opt = [...sel.options].find(o => o.value === currentId);
+            if (opt) sel.value = currentId;
           }
-        } catch (e) { console.error(e); }
-      }
+        }
 
-      // --- CRUD helpers ---
-      async function createTemplate() {
-        const name = document.getElementById('tplName').value || 'Untitled Template';
-        const template = designer.getTemplate();
-        if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
-        const res = await fetch(`${API.base}/api/templates`, {
-          method: 'POST', headers: headers(), body: JSON.stringify({ name, template })
+        // --- Initial template ---
+        const initialTemplate = {
+          basePdf: BLANK_PDF,
+          schemas: [[
+            { name: 'title', type: 'text', position: { x: 20, y: 20 }, width: 170, height: 15 }
+          ]]
+        };
+
+        // --- Base PDF utils ---
+        async function fileToDataUrl(file) {
+          const buf = await file.arrayBuffer();
+          const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+          return `data:application/pdf;base64,${b64}`;
+        }
+        function downloadDataUrlAs(name, dataUrl) {
+          const a = document.createElement('a');
+          a.href = dataUrl; a.download = name || 'base.pdf';
+          document.body.appendChild(a); a.click(); a.remove();
+        }
+        function setBaseStatus(which, has) {
+          const el = document.getElementById(which === 1 ? 'base1Status' : 'base2Status');
+          el.textContent = has ? 'set' : 'not set';
+          el.className = 'badge ' + (has ? 'good' : 'warn');
+        }
+
+        // --- Mount Designer (z vsemi plugini) ---
+        const container = document.getElementById('container');
+        const designer = new Designer({
+          domContainer: container,
+          template: initialTemplate,
+          plugins,
+          options: { zoomLevel: 1 }
         });
-        if (!res.ok) throw new Error('Create failed');
-        const obj = await res.json();
-        setCurrentId(obj.id);
-        return obj;
-      }
 
-      async function updateTemplate(id) {
-        const name = document.getElementById('tplName').value || 'Untitled Template';
-        const template = designer.getTemplate();
-        if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
-        const res = await fetch(`${API.base}/api/templates/${id}`, {
-          method: 'PUT', headers: headers(), body: JSON.stringify({ name, template })
-        });
-        if (!res.ok) throw new Error('Update failed');
-        const obj = await res.json();
-        setCurrentId(obj.id);
-        return obj;
-      }
+        // --- Template list ---
+        async function refreshList() {
+          try {
+            const res = await fetch(`${API.base}/api/templates`, { headers: headers() });
+            if (!res.ok) {
+              console.warn('Template list failed', res.status);
+              document.getElementById('tplList').innerHTML = '';
+              return;
+            }
+            const list = await res.json();
+            const select = document.getElementById('tplList');
+            select.innerHTML = '';
+            for (const r of list) {
+              const opt = document.createElement('option');
+              opt.value = r.id; opt.textContent = `${r.name} — ${r.id}`;
+              select.appendChild(opt);
+            }
+            if (currentId) {
+              const opt = [...select.options].find(o => o.value === currentId);
+              if (opt) sel.value = currentId;
+            }
+          } catch (e) { showErr(e); }
+        }
 
-      async function deleteTemplate(id) {
-        const res = await fetch(`${API.base}/api/templates/${id}`, { method: 'DELETE', headers: headers() });
-        if (res.status === 204) return true;
-        if (res.status === 404) throw new Error('Template not found');
-        throw new Error('Delete failed');
-      }
+        // --- CRUD helpers ---
+        async function createTemplate() {
+          const name = document.getElementById('tplName').value || 'Untitled Template';
+          const template = designer.getTemplate();
+          if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
+          const res = await fetch(`${API.base}/api/templates`, {
+            method: 'POST', headers: headers(), body: JSON.stringify({ name, template })
+          });
+          if (!res.ok) throw new Error('Create failed');
+          const obj = await res.json();
+          setCurrentId(obj.id);
+          return obj;
+        }
 
-      // --- Topbar handlers ---
-      document.getElementById('btnNew').onclick = () => {
-        designer.updateTemplate(initialTemplate);
-        document.getElementById('tplName').value = '';
-        secondBasePdf = null;
-        setBaseStatus(1, false);
-        setBaseStatus(2, false);
-        setCurrentId(null);
-      };
+        async function updateTemplate(id) {
+          const name = document.getElementById('tplName').value || 'Untitled Template';
+          const template = designer.getTemplate();
+          if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
+          const res = await fetch(`${API.base}/api/templates/${id}`, {
+            method: 'PUT', headers: headers(), body: JSON.stringify({ name, template })
+          });
+          if (!res.ok) throw new Error('Update failed');
+          const obj = await res.json();
+          setCurrentId(obj.id);
+          return obj;
+        }
 
-      document.getElementById('btnSave').onclick = async () => {
-        try {
-          if (currentId) await updateTemplate(currentId); else await createTemplate();
-          await refreshList();
-          alert('Saved!');
-        } catch (e) { console.error(e); alert(e.message || 'Save failed'); }
-      };
+        async function deleteTemplate(id) {
+          const res = await fetch(`${API.base}/api/templates/${id}`, { method: 'DELETE', headers: headers() });
+          if (res.status === 204) return true;
+          if (res.status === 404) throw new Error('Template not found');
+          throw new Error('Delete failed');
+        }
 
-      document.getElementById('btnSaveAs').onclick = async () => {
-        try {
-          setCurrentId(null);
-          await createTemplate();
-          await refreshList();
-          alert('Saved as new template!');
-        } catch (e) { console.error(e); alert(e.message || 'Save As failed'); }
-      };
-
-      document.getElementById('btnLoad').onclick = async () => {
-        const id = document.getElementById('tplList').value; if (!id) return;
-        const res = await fetch(`${API.base}/api/templates/${id}`, { headers: headers() });
-        if (!res.ok) return alert('Load failed');
-        const { name, template, id: loadedId } = await res.json();
-        document.getElementById('tplName').value = name;
-        designer.updateTemplate(template);
-        secondBasePdf = typeof template._secondBasePdf === 'string' ? template._secondBasePdf : null;
-        setBaseStatus(1, typeof template.basePdf === 'string');
-        setBaseStatus(2, !!secondBasePdf);
-        setCurrentId(loadedId || id);
-      };
-
-      document.getElementById('btnDelete').onclick = async () => {
-        try {
-          if (!currentId) return alert('Ni izbranega template-a (Current ID je prazen).');
-          const currentName = document.getElementById('tplName').value || '(unnamed)';
-          const sure = confirm(`Res želiš izbrisati template?\n\nName: ${currentName}\nID: ${currentId}`);
-          if (!sure) return;
-          await deleteTemplate(currentId);
-          setCurrentId(null);
-          document.getElementById('tplName').value = '';
+        // --- Topbar handlers ---
+        document.getElementById('btnNew').onclick = () => {
           designer.updateTemplate(initialTemplate);
+          document.getElementById('tplName').value = '';
           secondBasePdf = null;
           setBaseStatus(1, false);
           setBaseStatus(2, false);
-          await refreshList();
-          alert('Deleted.');
-        } catch (e) { console.error(e); alert(e.message || 'Delete failed'); }
-      };
+          setCurrentId(null);
+        };
 
-      document.getElementById('btnPreview').onclick = async () => {
-        try {
-          const t = designer.getTemplate();
-          if (secondBasePdf) t._secondBasePdf = secondBasePdf; else delete t._secondBasePdf;
-          const inputs = [ { title: 'Hello from PDFme' }, { title: 'Second page' } ];
-          const res = await fetch(`${API.base}/api/render`, {
-            method: 'POST', headers: headers(), body: JSON.stringify({ template: t, inputs, fileName: 'preview' })
-          });
-          if (!res.ok) return alert('Preview failed');
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          window.open(url, '_blank');
-        } catch (e) { console.error(e); alert('Preview error'); }
-      };
+        document.getElementById('btnSave').onclick = async () => {
+          try {
+            if (currentId) await updateTemplate(currentId); else await createTemplate();
+            await refreshList();
+            alert('Saved!');
+          } catch (e) { showErr(e); alert(e.message || 'Save failed'); }
+        };
 
-      // --- Base PDF buttons ---
-      document.getElementById('btnBase1Upload').onclick = async () => {
-        const f = document.getElementById('base1File').files?.[0];
-        if (!f) return alert('Izberi PDF datoteko.');
-        const dataUrl = await fileToDataUrl(f);
-        const tpl = designer.getTemplate();
-        tpl.basePdf = dataUrl;
-        designer.updateTemplate(tpl);
-        setBaseStatus(1, true);
-        alert('Base PDF (page 1) set.');
-      };
-      document.getElementById('btnBase1Clear').onclick = () => {
-        const tpl = designer.getTemplate();
-        tpl.basePdf = BLANK_PDF;
-        designer.updateTemplate(tpl);
+        document.getElementById('btnSaveAs').onclick = async () => {
+          try {
+            setCurrentId(null);
+            await createTemplate();
+            await refreshList();
+            alert('Saved as new template!');
+          } catch (e) { showErr(e); alert(e.message || 'Save As failed'); }
+        };
+
+        document.getElementById('btnLoad').onclick = async () => {
+          const id = document.getElementById('tplList').value; if (!id) return;
+          const res = await fetch(`${API.base}/api/templates/${id}`, { headers: headers() });
+          if (!res.ok) return alert('Load failed');
+          const { name, template, id: loadedId } = await res.json();
+          document.getElementById('tplName').value = name;
+          designer.updateTemplate(template);
+          secondBasePdf = typeof template._secondBasePdf === 'string' ? template._secondBasePdf : null;
+          setBaseStatus(1, typeof template.basePdf === 'string');
+          setBaseStatus(2, !!secondBasePdf);
+          setCurrentId(loadedId || id);
+        };
+
+        document.getElementById('btnDelete').onclick = async () => {
+          try {
+            if (!currentId) return alert('Ni izbranega template-a (Current ID je prazen).');
+            const currentName = document.getElementById('tplName').value || '(unnamed)';
+            const sure = confirm(`Res želiš izbrisati template?\n\nName: ${currentName}\nID: ${currentId}`);
+            if (!sure) return;
+            await deleteTemplate(currentId);
+            setCurrentId(null);
+            document.getElementById('tplName').value = '';
+            designer.updateTemplate(initialTemplate);
+            secondBasePdf = null;
+            setBaseStatus(1, false);
+            setBaseStatus(2, false);
+            await refreshList();
+            alert('Deleted.');
+          } catch (e) { showErr(e); alert(e.message || 'Delete failed'); }
+        };
+
+        document.getElementById('btnPreview').onclick = async () => {
+          try {
+            const t = designer.getTemplate();
+            if (secondBasePdf) t._secondBasePdf = secondBasePdf; else delete t._secondBasePdf;
+            const inputs = [ { title: 'Hello from PDFme' }, { title: 'Second page' } ];
+            const res = await fetch(`${API.base}/api/render`, {
+              method: 'POST', headers: headers(), body: JSON.stringify({ template: t, inputs, fileName: 'preview' })
+            });
+            if (!res.ok) return alert('Preview failed');
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+          } catch (e) { showErr(e); alert('Preview error'); }
+        };
+
+        // --- Base PDF buttons ---
+        document.getElementById('btnBase1Upload').onclick = async () => {
+          const f = document.getElementById('base1File').files?.[0];
+          if (!f) return alert('Izberi PDF datoteko.');
+          const dataUrl = await fileToDataUrl(f);
+          const tpl = designer.getTemplate();
+          tpl.basePdf = dataUrl;
+          designer.updateTemplate(tpl);
+          setBaseStatus(1, true);
+          alert('Base PDF (page 1) set.');
+        };
+        document.getElementById('btnBase1Clear').onclick = () => {
+          const tpl = designer.getTemplate();
+          tpl.basePdf = BLANK_PDF;
+          designer.updateTemplate(tpl);
+          setBaseStatus(1, false);
+        };
+        document.getElementById('btnBase1Download').onclick = () => {
+          const tpl = designer.getTemplate();
+          if (typeof tpl.basePdf === 'string') {
+            const name = (document.getElementById('tplName').value || 'template') + '_base_page1.pdf';
+            downloadDataUrlAs(name, tpl.basePdf);
+          } else {
+            alert('Ni nastavljenega Base PDF (page 1).');
+          }
+        };
+
+        document.getElementById('btnBase2Upload').onclick = async () => {
+          const f = document.getElementById('base2File').files?.[0];
+          if (!f) return alert('Izberi PDF datoteko.');
+          secondBasePdf = await fileToDataUrl(f);
+          setBaseStatus(2, true);
+          alert('Second-page Base PDF set.');
+        };
+        document.getElementById('btnBase2Clear').onclick = () => {
+          secondBasePdf = null;
+          setBaseStatus(2, false);
+        };
+        document.getElementById('btnBase2Download').onclick = () => {
+          if (secondBasePdf) {
+            const name = (document.getElementById('tplName').value || 'template') + '_base_page2plus.pdf';
+            downloadDataUrlAs(name, secondBasePdf);
+          } else {
+            alert('Ni nastavljenega Second-page Base PDF.');
+          }
+        };
+
+        // Init
+        updateAuthButtons();
+        setCurrentId(null);
         setBaseStatus(1, false);
-      };
-      document.getElementById('btnBase1Download').onclick = () => {
-        const tpl = designer.getTemplate();
-        if (typeof tpl.basePdf === 'string') {
-          const name = (document.getElementById('tplName').value || 'template') + '_base_page1.pdf';
-          downloadDataUrlAs(name, tpl.basePdf);
-        } else {
-          alert('Ni nastavljenega Base PDF (page 1).');
-        }
-      };
-
-      document.getElementById('btnBase2Upload').onclick = async () => {
-        const f = document.getElementById('base2File').files?.[0];
-        if (!f) return alert('Izberi PDF datoteko.');
-        secondBasePdf = await fileToDataUrl(f);
-        setBaseStatus(2, true);
-        alert('Second-page Base PDF set.');
-      };
-      document.getElementById('btnBase2Clear').onclick = () => {
-        secondBasePdf = null;
         setBaseStatus(2, false);
-      };
-      document.getElementById('btnBase2Download').onclick = () => {
-        if (secondBasePdf) {
-          const name = (document.getElementById('tplName').value || 'template') + '_base_page2plus.pdf';
-          downloadDataUrlAs(name, secondBasePdf);
-        } else {
-          alert('Ni nastavljenega Second-page Base PDF.');
-        }
-      };
-
-      // --- Init ---
-      updateAuthButtons();
-      setCurrentId(null);
-      setBaseStatus(1, false);
-      setBaseStatus(2, false);
-      document.getElementById('tplName').value = '';
-      refreshList();
+        document.getElementById('tplName').value = '';
+        refreshList();
+      } catch (e) {
+        showErr(e);
+      }
     </script>
   </body>
 </html>
