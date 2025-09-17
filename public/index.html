@@ -20,7 +20,19 @@
       .filehint { font-size: 12px; color: #6b7280; }
       .spacer { flex: 1; }
       .muted { color: #6b7280; font-size: 12px; }
-      #container { height: calc(100% - 116px); }
+      #mainWrap { display: flex; height: calc(100% - 116px); align-items: stretch; }
+      #container { flex: 1; min-width: 0; }
+      #varsPanel { width: 280px; border-left: 1px solid #e5e7eb; background: #f9fafb; display: flex; flex-direction: column; gap: 8px; padding: 12px; overflow-y: auto; }
+      #varsPanel.hidden { display: none; }
+      .varsHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .varsButtons { display: flex; gap: 6px; flex-shrink: 0; }
+      #varsSearch { width: 100%; box-sizing: border-box; }
+      #varsList { display: flex; flex-direction: column; gap: 6px; }
+      .varsItem { text-align: left; background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+      .varsItem:hover { border-color: #c7d2fe; background: #eef2ff; }
+      .varsPath { font-family: ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
+      .varsValue { color: #6b7280; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #varsMeta, #varsCopyInfo, #varsEmpty { font-size: 12px; color: #6b7280; }
       button { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; cursor: pointer; }
       input, select { padding: 6px 8px; border: 1px solid #ddd; border-radius: 8px; }
       #err { display:none; padding:10px 12px; color:#991b1b; background:#fef2f2; border:1px solid #fecaca; }
@@ -78,7 +90,26 @@
       <div class="filehint">Če dokument preseže 1 stran, se na vseh naslednjih straneh uporabi Page&nbsp;2+ base.</div>
     </div>
 
-    <div id="container"></div>
+    <div id="mainWrap">
+      <div id="container"></div>
+      <aside id="varsPanel">
+        <div class="varsHeader">
+          <div>
+            <strong>Variables</strong>
+            <div id="varsMeta" class="muted"></div>
+          </div>
+          <div class="varsButtons">
+            <button id="btnSetSample" type="button">Set JSON</button>
+            <button id="btnClearSample" type="button">Clear</button>
+          </div>
+        </div>
+        <div class="muted">Click a variable to copy <code>{{value}}</code>.</div>
+        <input id="varsSearch" type="search" placeholder="Search..." />
+        <div id="varsCopyInfo"></div>
+        <div id="varsEmpty" class="muted">Paste sample JSON to list placeholders.</div>
+        <div id="varsList"></div>
+      </aside>
+    </div>
 
     <script type="module">
       // ===== Helper za napake =====
@@ -202,6 +233,208 @@
           // === State ===
           let currentId = null;
           let secondBasePdf = null; // dataURL
+
+          // === Sample JSON / variables panel ===
+          const SAMPLE_JSON_KEY = 'PDFME_SAMPLE_JSON';
+          const varsMetaEl = document.getElementById('varsMeta');
+          const varsListEl = document.getElementById('varsList');
+          const varsEmptyEl = document.getElementById('varsEmpty');
+          const varsCopyInfoEl = document.getElementById('varsCopyInfo');
+          const varsSearchEl = document.getElementById('varsSearch');
+          const btnSetSample = document.getElementById('btnSetSample');
+          const btnClearSample = document.getElementById('btnClearSample');
+          let sampleData = null;
+          let sampleRaw = '';
+          let variablePaths = [];
+          let copyInfoTimeout = null;
+
+          const updateSampleControls = () => {
+            const hasSample = !!sampleData;
+            btnClearSample.disabled = !hasSample;
+            varsSearchEl.disabled = !hasSample;
+            if (!hasSample) varsSearchEl.value = '';
+          };
+
+          const truncatePreview = (value) => {
+            if (value === null || value === undefined) return '';
+            const str = String(value);
+            return str.length > 80 ? `${str.slice(0, 77)}...` : str;
+          };
+
+          const extractVariablePaths = (value, basePath = '') => {
+            const results = [];
+            const walk = (val, currentPath) => {
+              if (val === null || val === undefined) {
+                if (currentPath) results.push({ path: currentPath, preview: '' });
+                return;
+              }
+              if (typeof val === 'object') {
+                if (Array.isArray(val)) {
+                  if (!val.length) return;
+                  const nextPath = currentPath ? `${currentPath}[0]` : '[0]';
+                  walk(val[0], nextPath);
+                  return;
+                }
+                Object.entries(val).forEach(([key, child]) => {
+                  const nextPath = currentPath ? `${currentPath}.${key}` : key;
+                  walk(child, nextPath);
+                });
+                return;
+              }
+              if (currentPath) results.push({ path: currentPath, preview: truncatePreview(val) });
+            };
+            walk(value, basePath);
+            const seen = new Set();
+            return results.filter((item) => {
+              if (!item.path) return false;
+              if (seen.has(item.path)) return false;
+              seen.add(item.path);
+              return true;
+            });
+          };
+
+          const showCopyInfo = (msg) => {
+            varsCopyInfoEl.textContent = msg;
+            if (copyInfoTimeout) clearTimeout(copyInfoTimeout);
+            copyInfoTimeout = setTimeout(() => {
+              varsCopyInfoEl.textContent = '';
+            }, 3000);
+          };
+
+          const copyPlaceholder = async (path) => {
+            const text = `{{${path}}}`;
+            try {
+              if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+              } else {
+                const tmp = document.createElement('textarea');
+                tmp.value = text;
+                tmp.setAttribute('readonly', '');
+                tmp.style.position = 'fixed';
+                tmp.style.left = '-9999px';
+                document.body.appendChild(tmp);
+                tmp.select();
+                document.execCommand('copy');
+                tmp.remove();
+              }
+              showCopyInfo(`Copied ${text}`);
+            } catch (err) {
+              console.warn('Clipboard copy failed', err);
+              alert(`Copy failed. Placeholder: ${text}`);
+            }
+          };
+
+          const renderVariableList = () => {
+            varsListEl.innerHTML = '';
+            if (!sampleData || variablePaths.length === 0) {
+              varsEmptyEl.style.display = 'block';
+              varsEmptyEl.textContent = sampleData ? 'No scalar values found in sample JSON.' : 'Paste sample JSON to list placeholders.';
+              varsMetaEl.textContent = sampleData ? '0 placeholders' : 'No sample JSON';
+              updateSampleControls();
+              return;
+            }
+
+            const filter = varsSearchEl.value.trim().toLowerCase();
+            const filtered = filter
+              ? variablePaths.filter((item) => item.path.toLowerCase().includes(filter) || (item.preview && item.preview.toLowerCase().includes(filter)))
+              : variablePaths;
+
+            if (!filtered.length) {
+              varsEmptyEl.style.display = 'block';
+              varsEmptyEl.textContent = 'No matches for search.';
+            } else {
+              varsEmptyEl.style.display = 'none';
+              filtered.forEach((item) => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'varsItem';
+                btn.dataset.path = item.path;
+                const pathEl = document.createElement('div');
+                pathEl.className = 'varsPath';
+                pathEl.textContent = `{{${item.path}}}`;
+                btn.appendChild(pathEl);
+                if (item.preview) {
+                  const valEl = document.createElement('div');
+                  valEl.className = 'varsValue';
+                  valEl.textContent = item.preview;
+                  btn.appendChild(valEl);
+                }
+                btn.addEventListener('click', () => copyPlaceholder(item.path));
+                varsListEl.appendChild(btn);
+              });
+            }
+
+            varsMetaEl.textContent = `${variablePaths.length} placeholder${variablePaths.length === 1 ? '' : 's'}`;
+            updateSampleControls();
+          };
+
+          const setSampleData = (obj, rawText) => {
+            sampleData = obj;
+            sampleRaw = rawText;
+            try {
+              if (rawText) localStorage.setItem(SAMPLE_JSON_KEY, rawText);
+            } catch (err) {
+              console.warn('Cannot persist sample JSON', err);
+            }
+            if (obj && (typeof obj === 'object' || Array.isArray(obj))) {
+              variablePaths = extractVariablePaths(obj);
+            } else {
+              variablePaths = [];
+            }
+            renderVariableList();
+          };
+
+          const clearSampleData = () => {
+            sampleData = null;
+            sampleRaw = '';
+            variablePaths = [];
+            localStorage.removeItem(SAMPLE_JSON_KEY);
+            renderVariableList();
+          };
+
+          btnSetSample.onclick = () => {
+            const initial = sampleRaw && sampleRaw.length < 2000 ? sampleRaw : '';
+            const raw = prompt('Paste sample JSON (e.g. output of Parse JSON node):', initial);
+            if (!raw) return;
+            try {
+              const parsed = JSON.parse(raw);
+              setSampleData(parsed, raw);
+              showCopyInfo('Sample JSON saved.');
+            } catch (err) {
+              console.warn('Invalid JSON sample', err);
+              alert('Invalid JSON. Please paste a valid JSON object or array.');
+            }
+          };
+
+          btnClearSample.onclick = () => {
+            if (!sampleData) return;
+            const ok = confirm('Clear stored sample JSON and variable list?');
+            if (ok) {
+              clearSampleData();
+              showCopyInfo('Sample JSON cleared.');
+            }
+          };
+
+          varsSearchEl.addEventListener('input', () => renderVariableList());
+
+          (() => {
+            const stored = localStorage.getItem(SAMPLE_JSON_KEY);
+            if (stored) {
+              try {
+                const parsed = JSON.parse(stored);
+                sampleRaw = stored;
+                sampleData = parsed;
+                if (parsed && (typeof parsed === 'object' || Array.isArray(parsed))) {
+                  variablePaths = extractVariablePaths(parsed);
+                }
+              } catch (err) {
+                console.warn('Stored sample JSON is invalid', err);
+                localStorage.removeItem(SAMPLE_JSON_KEY);
+              }
+            }
+            renderVariableList();
+          })();
+
           const setCurrentId = (id) => {
             currentId = id || null;
             document.getElementById('currentId').textContent = currentId || '(none)';

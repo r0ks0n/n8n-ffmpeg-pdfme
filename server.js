@@ -50,6 +50,39 @@ function auth(req, res, next) {
   return res.status(401).json({ error: 'Unauthorized' });
 }
 
+// ---- Variable interpolation helpers ----
+function getByPath(source, path) {
+  if (!source || !path) return undefined;
+  const normalized = String(path).replace(/\[(\d+)\]/g, '.$1');
+  return normalized.split('.').reduce((acc, key) => {
+    if (acc === undefined || acc === null) return undefined;
+    return Object.prototype.hasOwnProperty.call(acc, key) ? acc[key] : undefined;
+  }, source);
+}
+
+function interpolateString(str, ctx) {
+  if (!ctx) return String(str);
+  return String(str).replace(/{{\s*([^}]+?)\s*}}/g, (_match, expr) => {
+    const value = getByPath(ctx, expr.trim());
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'object') {
+      try { return JSON.stringify(value); }
+      catch { return ''; }
+    }
+    return String(value);
+  });
+}
+
+function interpolateAll(obj, ctx) {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'string') return interpolateString(obj, ctx);
+  if (Array.isArray(obj)) return obj.map((item) => interpolateAll(item, ctx));
+  if (typeof obj === 'object') {
+    return Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, interpolateAll(value, ctx)]));
+  }
+  return obj;
+}
+
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 // List
@@ -135,7 +168,13 @@ app.post('/api/render', auth, async (req, res) => {
       };
     }
 
-    const u8 = await generate({ template, inputs, plugins });
+    const globalCtx = req.body && typeof req.body.context === 'object' && req.body.context ? req.body.context : null;
+    const finalInputs = inputs.map((item) => {
+      const ctx = globalCtx ? { ...globalCtx, ...item } : item;
+      return interpolateAll(item, ctx);
+    });
+
+    const u8 = await generate({ template, inputs: finalInputs, plugins });
     const buf = Buffer.from(u8);
 
     res.set('Content-Type', 'application/pdf');
