@@ -6,11 +6,9 @@
     <title>PDFme Editor (Railway)</title>
     <style>
       html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-      /* TOPBAR = 1. vrstica: Name + akcije */
       #topbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; background: #fff; z-index: 5; flex-wrap: wrap; }
       #nameWrap { display: flex; align-items: center; gap: 8px; }
       #tplName { min-width: 260px; }
-      /* SUBBAR = 2. vrstica: Base PDFs v ENI vrstici */
       #subbar { display: flex; gap: 16px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e5e7eb; background: #fafafa; flex-wrap: wrap; }
       .baseGroup { display: flex; align-items: center; gap: 8px; }
       .label { font-size: 13px; color: #374151; min-width: 90px; }
@@ -29,7 +27,6 @@
   <body>
     <div id="err"></div>
 
-    <!-- TOP vrstica -->
     <div id="topbar">
       <strong>PDFme Editor</strong>
 
@@ -55,7 +52,6 @@
       <div class="muted">Current ID: <span id="currentId">(none)</span></div>
     </div>
 
-    <!-- Druga vrstica -->
     <div id="subbar">
       <div class="baseGroup">
         <span class="label">Page 1 base:</span>
@@ -82,25 +78,27 @@
 
     <script type="module">
       // -------- robusten import (bundlano) --------
-      const uiMod     = await import('https://esm.sh/@pdfme/ui@5?target=es2020&bundle');
-      const commonMod = await import('https://esm.sh/@pdfme/common@5?target=es2020&bundle');
-      // @pdfme/schemas kot bundlan namespace (včasih je težava, če ni bundlano)
-      const schMod    = await import('https://esm.sh/@pdfme/schemas@5?target=es2020&bundle');
+      const uiMod     = await import('https://esm.sh/@pdfme/ui@5?bundle&target=es2020');
+      const commonMod = await import('https://esm.sh/@pdfme/common@5?bundle&target=es2020');
+      const schRaw    = await import('https://esm.sh/@pdfme/schemas@5?bundle&target=es2020');
+      const schemas   = schRaw?.default ?? schRaw; // <-- če CDN da exporte pod `default`
 
       const { Designer } = uiMod;
       const { BLANK_PDF } = commonMod;
 
-      // Vsi plugin-i
+      // Vsi plugin-i (če kateri manjka, vržemo jasen error)
       const plugins = {
-        text: schMod.text,
-        image: schMod.image,
-        rect: schMod.rect,
-        line: schMod.line,
-        table: schMod.table,
-        barcode: schMod.barcode, // qrcode, code128, ean13, ...
+        text:    schemas.text,
+        image:   schemas.image,
+        rect:    schemas.rect,
+        line:    schemas.line,
+        table:   schemas.table,
+        barcode: schemas.barcode,
       };
+      ['text','image','rect','line','table','barcode'].forEach(k=>{
+        if(!plugins[k]) throw new Error(`Missing plugin export: ${k}`);
+      });
 
-      // --- mini helper za prikaz napak ---
       function showErr(e) {
         const box = document.getElementById('err');
         box.style.display = 'block';
@@ -109,18 +107,16 @@
       }
 
       try {
-        // --- API config & auth ---
+        // --- API & auth ---
         const API = { base: location.origin, token: localStorage.getItem('EDITOR_TOKEN') || '' };
-        function headers() {
-          return API.token
-            ? { 'Authorization': `Bearer ${API.token}`, 'Content-Type': 'application/json' }
-            : { 'Content-Type': 'application/json' };
-        }
-        function updateAuthButtons() {
+        const headers = () => API.token
+          ? { 'Authorization': `Bearer ${API.token}`, 'Content-Type': 'application/json' }
+          : { 'Content-Type': 'application/json' };
+        const updateAuthButtons = () => {
           const has = !!API.token;
           document.getElementById('btnSetToken').style.display = has ? 'none' : 'inline-block';
           document.getElementById('btnLogout').style.display = has ? 'inline-block' : 'none';
-        }
+        };
         document.getElementById('btnSetToken').onclick = async () => {
           const t = prompt('Paste EDITOR_AUTH_TOKEN');
           if (t && t.trim()) {
@@ -145,10 +141,10 @@
         function setCurrentId(id) {
           currentId = id || null;
           document.getElementById('currentId').textContent = currentId || '(none)';
-          const sel = document.getElementById('tplList');
+          const select = document.getElementById('tplList');
           if (currentId) {
-            const opt = [...sel.options].find(o => o.value === currentId);
-            if (opt) sel.value = currentId;
+            const opt = [...select.options].find(o => o.value === currentId);
+            if (opt) select.value = currentId;
           }
         }
 
@@ -160,7 +156,7 @@
           ]]
         };
 
-        // --- Base PDF utils ---
+        // --- utils ---
         async function fileToDataUrl(file) {
           const buf = await file.arrayBuffer();
           const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -186,7 +182,7 @@
           options: { zoomLevel: 1 }
         });
 
-        // --- Template list ---
+        // --- list / CRUD ---
         async function refreshList() {
           try {
             const res = await fetch(`${API.base}/api/templates`, { headers: headers() });
@@ -205,12 +201,11 @@
             }
             if (currentId) {
               const opt = [...select.options].find(o => o.value === currentId);
-              if (opt) sel.value = currentId;
+              if (opt) select.value = currentId;
             }
           } catch (e) { showErr(e); }
         }
 
-        // --- CRUD helpers ---
         async function createTemplate() {
           const name = document.getElementById('tplName').value || 'Untitled Template';
           const template = designer.getTemplate();
