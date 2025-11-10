@@ -456,7 +456,15 @@
           // === Utils ===
           const fileToDataUrl = async (file) => {
             const buf = await file.arrayBuffer();
-            const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+            const bytes = new Uint8Array(buf);
+            // Process in chunks to avoid stack overflow with large files
+            const chunkSize = 8192;
+            let binary = '';
+            for (let i = 0; i < bytes.length; i += chunkSize) {
+              const chunk = bytes.subarray(i, i + chunkSize);
+              binary += String.fromCharCode(...chunk);
+            }
+            const b64 = btoa(binary);
             return `data:application/pdf;base64,${b64}`;
           };
           const downloadDataUrlAs = (name, dataUrl) => {
