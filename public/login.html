@@ -349,21 +349,8 @@
       }
     });
 
-    // Check if already authenticated
-    const storedCredentials = sessionStorage.getItem('auth_credentials');
-    if (storedCredentials) {
-      // Try to verify stored credentials
-      fetch('/api/health', {
-        headers: {
-          'Authorization': `Basic ${storedCredentials}`
-        }
-      }).then(response => {
-        if (response.ok) {
-          // Already authenticated, redirect to main page
-          window.location.href = '/';
-        }
-      });
-    }
+    // Don't auto-verify credentials on page load to prevent infinite redirect loops
+    // User must explicitly click "Sign in" button
   </script>
 </body>
 </html>
