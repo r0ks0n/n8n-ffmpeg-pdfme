@@ -168,7 +168,10 @@ function interpolateAll(obj, ctx) {
   return obj;
 }
 
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/health', (req, res) => {
+  console.log('[HEALTH CHECK]', req.headers['authorization'] ? 'With auth header' : 'No auth header');
+  res.json({ ok: true });
+});
 
 // List
 app.get('/api/templates', auth, async (_req, res) => {
