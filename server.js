@@ -205,8 +205,9 @@ app.post('/api/render', auth, async (req, res) => {
         });
       }
 
-      // Generate PDF with interpolated template and empty inputs (data already in template)
-      const u8 = await generate({ template: interpolatedTemplate, inputs: [{}], plugins });
+      // Generate PDF with interpolated template
+      // PDFme still needs the inputs array with the original data for non-interpolated fields
+      const u8 = await generate({ template: interpolatedTemplate, inputs: [inputItem], plugins });
       pdfs.push(u8);
     }
 
@@ -249,4 +250,3 @@ app.post('/api/preview', auth, async (req, res) => {
 
 await initDb();
 app.listen(port, () => console.log(`PDFme Editor running on :${port}`));
-  
