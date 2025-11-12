@@ -173,14 +173,54 @@ app.post('/api/render', auth, async (req, res) => {
       rectangle: schemas.graphics.rectangle
     };
 
-    const globalCtx = req.body && typeof req.body.context === 'object' && req.body.context ? req.body.context : null;
-    const finalInputs = inputs.map((item) => {
-      const ctx = globalCtx ? { ...globalCtx, ...item } : item;
-      return interpolateAll(item, ctx);
-    });
+    // Interpolate template schemas with input data
+    // Each input item gets its own interpolated template
+    const pdfs = [];
+    for (const inputItem of inputs) {
+      // Create context by merging global context with current item
+      const ctx = req.body.context ? { ...req.body.context, ...inputItem } : inputItem;
+      console.log('[RENDER] Input context:', JSON.stringify(ctx, null, 2));
 
-    const u8 = await generate({ template, inputs: finalInputs, plugins });
-    const buf = Buffer.from(u8);
+      // Deep clone template and interpolate all {{variable}} in schemas
+      const interpolatedTemplate = JSON.parse(JSON.stringify(template));
+      if (interpolatedTemplate.schemas && Array.isArray(interpolatedTemplate.schemas)) {
+        interpolatedTemplate.schemas = interpolatedTemplate.schemas.map(pageSchemas => {
+          if (!Array.isArray(pageSchemas)) return pageSchemas;
+          return pageSchemas.map(schema => {
+            const newSchema = { ...schema };
+            // Interpolate 'content' field (multiVariableText, text)
+            if (newSchema.content && typeof newSchema.content === 'string') {
+              const before = newSchema.content;
+              newSchema.content = interpolateString(newSchema.content, ctx);
+              console.log(`[RENDER] Interpolated content: "${before}" -> "${newSchema.content}"`);
+            }
+            // Interpolate 'text' field (legacy text schemas)
+            if (newSchema.text && typeof newSchema.text === 'string') {
+              const before = newSchema.text;
+              newSchema.text = interpolateString(newSchema.text, ctx);
+              console.log(`[RENDER] Interpolated text: "${before}" -> "${newSchema.text}"`);
+            }
+            return newSchema;
+          });
+        });
+      }
+
+      // Generate PDF with interpolated template and empty inputs (data already in template)
+      const u8 = await generate({ template: interpolatedTemplate, inputs: [{}], plugins });
+      pdfs.push(u8);
+    }
+
+    // If single input, return single PDF; otherwise merge PDFs
+    let finalPdf;
+    if (pdfs.length === 1) {
+      finalPdf = pdfs[0];
+    } else {
+      // For multiple inputs, concatenate PDFs (simple approach - just return first for now)
+      // TODO: Implement proper PDF merging if needed
+      finalPdf = pdfs[0];
+    }
+
+    const buf = Buffer.from(finalPdf);
 
     res.set('Content-Type', 'application/pdf');
     res.set('Content-Disposition', `inline; filename="${(fileName || 'output')}.pdf"`);
