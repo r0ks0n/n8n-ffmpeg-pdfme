@@ -159,14 +159,19 @@ app.post('/api/render', auth, async (req, res) => {
     }
 
     const { generate } = await import('@pdfme/generator');
-    let plugins;
-    if (usePlugins) {
-      const schemas = await import('@pdfme/schemas');
-      plugins = {
-        image: schemas.image,
-        qrcode: schemas.barcode.qrcode,
-      };
-    }
+    const schemas = await import('@pdfme/schemas');
+
+    // Always include all common plugins (text, multiVariableText, image, etc.)
+    const plugins = {
+      text: schemas.text,
+      multiVariableText: schemas.multiVariableText,
+      image: schemas.image,
+      qrcode: schemas.barcode.qrcode,
+      svg: schemas.svg,
+      line: schemas.graphics.line,
+      ellipse: schemas.graphics.ellipse,
+      rectangle: schemas.graphics.rectangle
+    };
 
     const globalCtx = req.body && typeof req.body.context === 'object' && req.body.context ? req.body.context : null;
     const finalInputs = inputs.map((item) => {
@@ -204,3 +209,4 @@ app.post('/api/preview', auth, async (req, res) => {
 
 await initDb();
 app.listen(port, () => console.log(`PDFme Editor running on :${port}`));
+  
