@@ -161,21 +161,13 @@ app.post('/api/render', auth, async (req, res) => {
     const { generate } = await import('@pdfme/generator');
     const schemas = await import('@pdfme/schemas');
 
-    // Always include all common plugins (text, multiVariableText, image, etc.)
+    // Only include plugins that exist in @pdfme/schemas v5.3.0
     const plugins = {
       text: schemas.text,
       multiVariableText: schemas.multiVariableText,
       image: schemas.image,
-      svg: schemas.svg,
-      line: schemas.graphics?.line,
-      ellipse: schemas.graphics?.ellipse,
-      rectangle: schemas.graphics?.rectangle
+      svg: schemas.svg
     };
-
-    // Add barcodes if available (optional dependency)
-    if (schemas.barcodes?.qrcode) {
-      plugins.qrcode = schemas.barcodes.qrcode;
-    }
 
     // Interpolate template schemas with input data
     // Each input item gets its own interpolated template
