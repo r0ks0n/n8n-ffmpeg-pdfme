@@ -10,7 +10,28 @@ This project bundles a minimal PDF template editor (powered by PDFme Designer) t
   - `CORS_ORIGIN` – Allowed origin for the editor UI (`*` for testing, restrict in production).
   - `EDITOR_AUTH_TOKEN` – Optional bearer token required for CRUD/render endpoints when set.
   - `N8N_PREVIEW_WEBHOOK_URL` – Optional; if set, `/api/preview` proxies requests to n8n for legacy preview flows.
+  - **`EDITOR_USERNAME`** – Optional; if set (with `EDITOR_PASSWORD`), enables HTTP Basic Auth for the editor UI.
+  - **`EDITOR_PASSWORD`** – Optional; if set (with `EDITOR_USERNAME`), enables HTTP Basic Auth for the editor UI.
 - Static assets are served from `public/` (the editor UI).
+
+### Security Features
+The editor includes multiple layers of security:
+
+1. **HTTP Basic Auth** (Optional, recommended for production)
+   - Set `EDITOR_USERNAME` and `EDITOR_PASSWORD` to enable
+   - Browser will prompt for credentials when accessing the editor UI
+   - API endpoints use separate Bearer token auth (`EDITOR_AUTH_TOKEN`)
+   - Example: `EDITOR_USERNAME=admin` and `EDITOR_PASSWORD=secure_password_123`
+
+2. **Rate Limiting**
+   - Automatically blocks IPs after 5 failed authentication attempts
+   - 15-minute cooldown period after blocking
+   - Prevents brute-force attacks
+
+3. **Bearer Token for API**
+   - `EDITOR_AUTH_TOKEN` protects all `/api/*` endpoints
+   - Independent from Basic Auth (UI and API can use different credentials)
+   - Required for n8n integration and programmatic access
 
 To run locally:
 ```bash
@@ -142,6 +163,84 @@ When `/api/render` receives `inputs` containing the same structure as the sample
 
 ## Testing Suggestions
 - Manually run `npm start` and visit `http://localhost:3000/`.
+- If Basic Auth is enabled, browser will prompt for username/password.
 - Paste the sample JSON, insert placeholders into a text schema, and click **Preview**. If `EDITOR_AUTH_TOKEN` is set, ensure it matches the value entered via **Set Token**.
 - Verify the downloaded PDF contains real interpolated values.
+
+## Production Deployment Checklist
+
+Before deploying to production, ensure these security measures are in place:
+
+### ✅ Required
+- [ ] Set `EDITOR_USERNAME` and `EDITOR_PASSWORD` for UI access
+- [ ] Set `EDITOR_AUTH_TOKEN` for API access (used by n8n)
+- [ ] Set `CORS_ORIGIN` to your n8n domain (not `*`)
+- [ ] Verify `DATABASE_URL` points to production PostgreSQL
+
+### ✅ Recommended
+- [ ] Use strong passwords (16+ characters, mixed case, numbers, symbols)
+- [ ] Store credentials in Railway's environment variables (never in code)
+- [ ] Enable HTTPS (Railway handles this automatically)
+- [ ] Monitor failed authentication attempts in logs
+- [ ] Regularly rotate passwords and tokens
+
+### Example Railway Environment Variables
+```bash
+# Database (auto-injected by Railway PostgreSQL plugin)
+DATABASE_URL=postgresql://user:pass@host:5432/db
+
+# CORS (restrict to your n8n instance)
+CORS_ORIGIN=https://your-n8n-instance.app
+
+# Editor UI Protection (Basic Auth)
+EDITOR_USERNAME=admin
+EDITOR_PASSWORD=Str0ng!P@ssw0rd_2024
+
+# API Protection (Bearer Token for n8n)
+EDITOR_AUTH_TOKEN=secret_token_for_n8n_api_calls_xyz123
+
+# Optional
+N8N_PREVIEW_WEBHOOK_URL=https://your-n8n.app/webhook/preview
+PORT=3000
+```
+
+### Security Architecture
+```
+┌─────────────────────────────────────────┐
+│  Internet                               │
+└──────────────┬──────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────┐
+│  Railway (HTTPS)                         │
+│  ┌────────────────────────────────────┐  │
+│  │  PDFme Editor Service              │  │
+│  │                                    │  │
+│  │  ┌──────────────────────────────┐ │  │
+│  │  │ Rate Limiter                 │ │  │
+│  │  │ (5 attempts / 15min)         │ │  │
+│  │  └──────────────────────────────┘ │  │
+│  │              │                     │  │
+│  │              ▼                     │  │
+│  │  ┌──────────────────────────────┐ │  │
+│  │  │ UI Path (/*)                 │ │  │
+│  │  │ → Basic Auth                 │ │  │
+│  │  │   (EDITOR_USERNAME/PASSWORD) │ │  │
+│  │  └──────────────────────────────┘ │  │
+│  │              │                     │  │
+│  │              ▼                     │  │
+│  │  ┌──────────────────────────────┐ │  │
+│  │  │ API Path (/api/*)            │ │  │
+│  │  │ → Bearer Token               │ │  │
+│  │  │   (EDITOR_AUTH_TOKEN)        │ │  │
+│  │  └──────────────────────────────┘ │  │
+│  └────────────────────────────────────┘  │
+│                 │                        │
+│                 ▼                        │
+│  ┌────────────────────────────────────┐  │
+│  │  PostgreSQL Database               │  │
+│  │  (templates storage)               │  │
+│  └────────────────────────────────────┘  │
+└──────────────────────────────────────────┘
+```
 

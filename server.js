@@ -11,8 +11,83 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 const EDITOR_AUTH_TOKEN = process.env.EDITOR_AUTH_TOKEN || '';
 const N8N_PREVIEW_WEBHOOK_URL = process.env.N8N_PREVIEW_WEBHOOK_URL || '';
 
+// Security: Basic Auth for Editor UI
+const EDITOR_USERNAME = process.env.EDITOR_USERNAME || '';
+const EDITOR_PASSWORD = process.env.EDITOR_PASSWORD || '';
+
 app.use(cors({ origin: CORS_ORIGIN, credentials: false }));
 app.use(express.json({ limit: '10mb' }));
+
+// Basic Auth middleware for editor UI (only if credentials are set)
+const basicAuthMiddleware = (req, res, next) => {
+  // Skip auth if no credentials configured
+  if (!EDITOR_USERNAME || !EDITOR_PASSWORD) return next();
+
+  // Skip auth for API endpoints (they use Bearer token)
+  if (req.path.startsWith('/api/')) return next();
+
+  const authHeader = req.headers['authorization'];
+  if (!authHeader || !authHeader.startsWith('Basic ')) {
+    res.set('WWW-Authenticate', 'Basic realm="PDFme Editor"');
+    return res.status(401).send('Authentication required');
+  }
+
+  const base64Credentials = authHeader.split(' ')[1];
+  const credentials = Buffer.from(base64Credentials, 'base64').toString('utf-8');
+  const [username, password] = credentials.split(':');
+
+  if (username === EDITOR_USERNAME && password === EDITOR_PASSWORD) {
+    return next();
+  }
+
+  res.set('WWW-Authenticate', 'Basic realm="PDFme Editor"');
+  return res.status(401).send('Invalid credentials');
+};
+
+// Simple rate limiting for failed auth attempts
+const authAttempts = new Map();
+const MAX_AUTH_ATTEMPTS = 5;
+const ATTEMPT_WINDOW = 15 * 60 * 1000; // 15 minutes
+
+const rateLimitMiddleware = (req, res, next) => {
+  const ip = req.ip || req.socket.remoteAddress;
+  const now = Date.now();
+
+  if (!authAttempts.has(ip)) {
+    authAttempts.set(ip, { count: 0, firstAttempt: now });
+  }
+
+  const record = authAttempts.get(ip);
+
+  // Reset if window expired
+  if (now - record.firstAttempt > ATTEMPT_WINDOW) {
+    record.count = 0;
+    record.firstAttempt = now;
+  }
+
+  // Block if too many attempts
+  if (record.count >= MAX_AUTH_ATTEMPTS) {
+    const timeLeft = Math.ceil((ATTEMPT_WINDOW - (now - record.firstAttempt)) / 60000);
+    return res.status(429).send(`Too many failed attempts. Try again in ${timeLeft} minutes.`);
+  }
+
+  // Track failed attempts
+  const originalSend = res.send;
+  res.send = function(data) {
+    if (res.statusCode === 401) {
+      record.count++;
+    } else if (res.statusCode === 200 && !req.path.startsWith('/api/')) {
+      // Successful auth - reset counter
+      authAttempts.delete(ip);
+    }
+    return originalSend.call(this, data);
+  };
+
+  next();
+};
+
+app.use(rateLimitMiddleware);
+app.use(basicAuthMiddleware);
 app.use(express.static('public'));
 
 // ---- TEMP request logger (za debug) ----
