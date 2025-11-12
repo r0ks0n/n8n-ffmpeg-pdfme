@@ -166,12 +166,16 @@ app.post('/api/render', auth, async (req, res) => {
       text: schemas.text,
       multiVariableText: schemas.multiVariableText,
       image: schemas.image,
-      qrcode: schemas.barcode.qrcode,
       svg: schemas.svg,
-      line: schemas.graphics.line,
-      ellipse: schemas.graphics.ellipse,
-      rectangle: schemas.graphics.rectangle
+      line: schemas.graphics?.line,
+      ellipse: schemas.graphics?.ellipse,
+      rectangle: schemas.graphics?.rectangle
     };
+
+    // Add barcodes if available (optional dependency)
+    if (schemas.barcodes?.qrcode) {
+      plugins.qrcode = schemas.barcodes.qrcode;
+    }
 
     // Interpolate template schemas with input data
     // Each input item gets its own interpolated template
@@ -227,8 +231,13 @@ app.post('/api/render', auth, async (req, res) => {
     res.set('Content-Disposition', `inline; filename="${(fileName || 'output')}.pdf"`);
     res.send(buf);
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'render error' });
+    console.error('[RENDER ERROR] Full error:', e);
+    console.error('[RENDER ERROR] Stack:', e.stack);
+    res.status(500).json({
+      error: 'render error',
+      message: e.message,
+      details: e.toString()
+    });
   }
 });
 
