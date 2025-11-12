@@ -169,41 +169,44 @@ app.post('/api/render', auth, async (req, res) => {
       svg: schemas.svg
     };
 
-    // Interpolate template schemas with input data
-    // Each input item gets its own interpolated template
+    // Build inputs object that matches schema names with interpolated content
     const pdfs = [];
     for (const inputItem of inputs) {
       // Create context by merging global context with current item
       const ctx = req.body.context ? { ...req.body.context, ...inputItem } : inputItem;
       console.log('[RENDER] Input context:', JSON.stringify(ctx, null, 2));
 
-      // Deep clone template and interpolate all {{variable}} in schemas
-      const interpolatedTemplate = JSON.parse(JSON.stringify(template));
-      if (interpolatedTemplate.schemas && Array.isArray(interpolatedTemplate.schemas)) {
-        interpolatedTemplate.schemas = interpolatedTemplate.schemas.map(pageSchemas => {
-          if (!Array.isArray(pageSchemas)) return pageSchemas;
-          return pageSchemas.map(schema => {
-            const newSchema = { ...schema };
-            // Interpolate 'content' field (multiVariableText, text)
-            if (newSchema.content && typeof newSchema.content === 'string') {
-              const before = newSchema.content;
-              newSchema.content = interpolateString(newSchema.content, ctx);
-              console.log(`[RENDER] Interpolated content: "${before}" -> "${newSchema.content}"`);
+      // Build PDFme inputs by scanning schemas and creating matching keys
+      const pdfInputData = {};
+
+      if (template.schemas && Array.isArray(template.schemas)) {
+        template.schemas.forEach(pageSchemas => {
+          if (!Array.isArray(pageSchemas)) return;
+          pageSchemas.forEach(schema => {
+            // Get the field name (PDFme matches inputs by schema.name)
+            const fieldName = schema.name;
+            if (!fieldName) return;
+
+            // Check if content has {{variable}} syntax
+            const content = schema.content || schema.text || '';
+            if (typeof content === 'string' && content.includes('{{')) {
+              // Interpolate the content with context data
+              const interpolatedValue = interpolateString(content, ctx);
+              pdfInputData[fieldName] = interpolatedValue;
+              console.log(`[RENDER] Field "${fieldName}": "${content}" -> "${interpolatedValue}"`);
+            } else if (ctx[fieldName] !== undefined) {
+              // Direct mapping: use value from context if it exists
+              pdfInputData[fieldName] = ctx[fieldName];
+              console.log(`[RENDER] Field "${fieldName}": direct mapping -> "${ctx[fieldName]}"`);
             }
-            // Interpolate 'text' field (legacy text schemas)
-            if (newSchema.text && typeof newSchema.text === 'string') {
-              const before = newSchema.text;
-              newSchema.text = interpolateString(newSchema.text, ctx);
-              console.log(`[RENDER] Interpolated text: "${before}" -> "${newSchema.text}"`);
-            }
-            return newSchema;
           });
         });
       }
 
-      // Generate PDF with interpolated template
-      // PDFme still needs the inputs array with the original data for non-interpolated fields
-      const u8 = await generate({ template: interpolatedTemplate, inputs: [inputItem], plugins });
+      console.log('[RENDER] Final PDFme inputs:', JSON.stringify(pdfInputData, null, 2));
+
+      // Generate PDF with original template and our custom inputs
+      const u8 = await generate({ template, inputs: [pdfInputData], plugins });
       pdfs.push(u8);
     }
 
