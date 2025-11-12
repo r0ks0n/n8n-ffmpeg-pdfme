@@ -59,7 +59,7 @@
       <span class="spacer"></span>
 
       <select id="tplList" style="min-width:320px"></select>
-      <button id="btnLoad">Load</button>
+      <button id="btnLoad" style="display:none">Load</button>
 
       <button id="btnSetToken">Set Token</button>
       <button id="btnLogout" style="display:none">Logout</button>
@@ -593,17 +593,38 @@
             } catch (e) { showErr(e); alert(e.message || 'Save As failed'); }
           };
 
+          // Load template function (extracted for reuse)
+          const loadTemplate = async (id) => {
+            if (!id) return;
+            try {
+              const res = await fetch(`${API.base}/api/templates/${id}`, { headers: headers() });
+              if (!res.ok) {
+                alert('Load failed');
+                return;
+              }
+              const { name, template, id: loadedId } = await res.json();
+              document.getElementById('tplName').value = name;
+              designer.updateTemplate(template);
+              secondBasePdf = typeof template._secondBasePdf === 'string' ? template._secondBasePdf : null;
+              setBaseStatus(1, typeof template.basePdf === 'string');
+              setBaseStatus(2, !!secondBasePdf);
+              setCurrentId(loadedId || id);
+            } catch (e) {
+              showErr(e);
+              alert('Load failed: ' + (e.message || e));
+            }
+          };
+
+          // Auto-load on dropdown change
+          document.getElementById('tplList').onchange = async () => {
+            const id = document.getElementById('tplList').value;
+            await loadTemplate(id);
+          };
+
+          // Load button (kept for manual reload if needed)
           document.getElementById('btnLoad').onclick = async () => {
-            const id = document.getElementById('tplList').value; if (!id) return;
-            const res = await fetch(`${API.base}/api/templates/${id}`, { headers: headers() });
-            if (!res.ok) return alert('Load failed');
-            const { name, template, id: loadedId } = await res.json();
-            document.getElementById('tplName').value = name;
-            designer.updateTemplate(template);
-            secondBasePdf = typeof template._secondBasePdf === 'string' ? template._secondBasePdf : null;
-            setBaseStatus(1, typeof template.basePdf === 'string');
-            setBaseStatus(2, !!secondBasePdf);
-            setCurrentId(loadedId || id);
+            const id = document.getElementById('tplList').value;
+            await loadTemplate(id);
           };
 
           document.getElementById('btnDelete').onclick = async () => {
