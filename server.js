@@ -18,17 +18,24 @@ const EDITOR_PASSWORD = process.env.EDITOR_PASSWORD || '';
 app.use(cors({ origin: CORS_ORIGIN, credentials: false }));
 app.use(express.json({ limit: '10mb' }));
 
-// Basic Auth middleware for editor UI (only if credentials are set)
-const basicAuthMiddleware = (req, res, next) => {
+// Session-based auth middleware for editor UI
+const sessionAuthMiddleware = (req, res, next) => {
   // Skip auth if no credentials configured
   if (!EDITOR_USERNAME || !EDITOR_PASSWORD) return next();
 
   // Skip auth for API endpoints (they use Bearer token)
   if (req.path.startsWith('/api/')) return next();
 
+  // Allow access to login page
+  if (req.path === '/login.html' || req.path === '/login') return next();
+
+  // Check for Basic Auth header (from login page or direct access)
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Basic ')) {
-    res.set('WWW-Authenticate', 'Basic realm="PDFme Editor"');
+    // Redirect to login page instead of showing browser dialog
+    if (req.path === '/' || req.path === '/index.html') {
+      return res.redirect('/login.html');
+    }
     return res.status(401).send('Authentication required');
   }
 
@@ -40,7 +47,10 @@ const basicAuthMiddleware = (req, res, next) => {
     return next();
   }
 
-  res.set('WWW-Authenticate', 'Basic realm="PDFme Editor"');
+  // Invalid credentials - redirect to login
+  if (req.path === '/' || req.path === '/index.html') {
+    return res.redirect('/login.html');
+  }
   return res.status(401).send('Invalid credentials');
 };
 
@@ -87,7 +97,7 @@ const rateLimitMiddleware = (req, res, next) => {
 };
 
 app.use(rateLimitMiddleware);
-app.use(basicAuthMiddleware);
+app.use(sessionAuthMiddleware);
 app.use(express.static('public'));
 
 // ---- TEMP request logger (za debug) ----

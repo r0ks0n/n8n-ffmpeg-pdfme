@@ -223,14 +223,32 @@
           const { BLANK_PDF } = commonMod;
 
           // === API & auth ===
-          const API = { base: location.origin, token: localStorage.getItem('EDITOR_TOKEN') || '' };
-          const headers = () => API.token
-            ? { 'Authorization': `Bearer ${API.token}`, 'Content-Type': 'application/json' }
-            : { 'Content-Type': 'application/json' };
+          const API = {
+            base: location.origin,
+            token: localStorage.getItem('EDITOR_TOKEN') || '',
+            sessionAuth: sessionStorage.getItem('auth_credentials') || ''
+          };
+          const headers = () => {
+            const h = { 'Content-Type': 'application/json' };
+            // Add Bearer token if set (for API endpoints)
+            if (API.token) {
+              h['Authorization'] = `Bearer ${API.token}`;
+            }
+            // Add Basic Auth if logged in (for template endpoints)
+            else if (API.sessionAuth) {
+              h['Authorization'] = `Basic ${API.sessionAuth}`;
+            }
+            return h;
+          };
           const updateAuthButtons = () => {
-            const has = !!API.token;
-            document.getElementById('btnSetToken').style.display = has ? 'none' : 'inline-block';
-            document.getElementById('btnLogout').style.display = has ? 'inline-block' : 'none';
+            const hasToken = !!API.token;
+            const hasSession = !!API.sessionAuth;
+            // Show "Set Token" only if no token is set
+            document.getElementById('btnSetToken').style.display = hasToken ? 'none' : 'inline-block';
+            // Show "Logout" if user is logged in (either via token or session)
+            document.getElementById('btnLogout').style.display = (hasToken || hasSession) ? 'inline-block' : 'none';
+            // Update logout button text based on auth type
+            document.getElementById('btnLogout').textContent = hasToken ? 'Clear Token' : 'Logout';
           };
           document.getElementById('btnSetToken').onclick = async () => {
             const t = prompt('Paste EDITOR_AUTH_TOKEN');
@@ -243,11 +261,14 @@
             }
           };
           document.getElementById('btnLogout').onclick = async () => {
+            // Clear both API token and session auth
             localStorage.removeItem('EDITOR_TOKEN');
+            sessionStorage.removeItem('auth_credentials');
             API.token = '';
-            updateAuthButtons();
-            await refreshList();
-            alert('Logged out.');
+            API.sessionAuth = '';
+
+            // Redirect to login page
+            window.location.href = '/login.html';
           };
 
           // === State ===
