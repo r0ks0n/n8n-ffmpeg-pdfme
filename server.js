@@ -44,9 +44,11 @@ const sessionAuthMiddleware = (req, res, next) => {
   const [username, password] = credentials.split(':');
 
   if (username === EDITOR_USERNAME && password === EDITOR_PASSWORD) {
+    console.log('[AUTH SUCCESS] User authenticated:', username);
     return next();
   }
 
+  console.log('[AUTH FAILED] Invalid credentials for:', username);
   // Invalid credentials - redirect to login
   if (req.path === '/' || req.path === '/index.html') {
     return res.redirect('/login.html');
