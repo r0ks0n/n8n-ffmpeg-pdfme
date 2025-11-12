@@ -327,5 +327,13 @@ app.post('/api/preview', auth, async (req, res) => {
   }
 });
 
-await initDb();
+// Initialize database (skip if DB not available for local testing)
+try {
+  await initDb();
+  console.log('[DB] PostgreSQL connected and initialized');
+} catch (e) {
+  console.warn('[DB] PostgreSQL connection failed - running without database (templates won\'t persist)');
+  console.warn('[DB] Error:', e.message);
+}
+
 app.listen(port, () => console.log(`PDFme Editor running on :${port}`));
