@@ -53,6 +53,7 @@
       <button id="btnNew">New</button>
       <button id="btnSave">Save</button>
       <button id="btnSaveAs">Save As</button>
+      <button id="btnDuplicate" style="background:#f0f9ff;border-color:#bae6fd">Duplicate</button>
       <button id="btnDelete" style="background:#fff5f5;border-color:#f5c2c2">Delete</button>
       <button id="btnPreview">Preview</button>
 
@@ -624,6 +625,34 @@
               await refreshList();
               alert('Saved as new template!');
             } catch (e) { showErr(e); alert(e.message || 'Save As failed'); }
+          };
+
+          document.getElementById('btnDuplicate').onclick = async () => {
+            try {
+              if (!currentId) {
+                alert('No template loaded. Load a template first to duplicate it.');
+                return;
+              }
+
+              // Get current template name and add " (Copy)" suffix
+              const currentName = document.getElementById('tplName').value || 'Untitled Template';
+              const newName = `${currentName} (Copy)`;
+
+              // Update name field
+              document.getElementById('tplName').value = newName;
+
+              // Clear current ID to force creation of new template
+              setCurrentId(null);
+
+              // Create new template with all current data
+              await createTemplate();
+              await refreshList();
+
+              alert('Template duplicated successfully!');
+            } catch (e) {
+              showErr(e);
+              alert(e.message || 'Duplicate failed');
+            }
           };
 
           // Load template function (extracted for reuse)
