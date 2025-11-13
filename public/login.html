@@ -319,6 +319,7 @@
       try {
         // Create Basic Auth header
         const credentials = btoa(`${username}:${password}`);
+        console.log('[LOGIN] Attempting authentication...');
 
         // Test authentication by calling the auth verification endpoint
         const response = await fetch('/api/auth/verify', {
@@ -327,22 +328,30 @@
           }
         });
 
+        console.log('[LOGIN] Response status:', response.status);
+
         if (response.ok) {
+          console.log('[LOGIN] Authentication successful!');
           // Store credentials in sessionStorage (will be cleared on browser close)
           sessionStorage.setItem('auth_credentials', credentials);
+          console.log('[LOGIN] Credentials stored in sessionStorage');
 
           // Redirect to main editor
+          console.log('[LOGIN] Redirecting to /...');
           window.location.href = '/';
         } else if (response.status === 401) {
+          console.log('[LOGIN] Authentication failed - 401');
           showError('Invalid username or password');
         } else if (response.status === 429) {
+          console.log('[LOGIN] Rate limited - 429');
           const text = await response.text();
           showError(text || 'Too many failed attempts. Please try again later.');
         } else {
+          console.log('[LOGIN] Unknown error - status:', response.status);
           showError('Login failed. Please try again.');
         }
       } catch (err) {
-        console.error('Login error:', err);
+        console.error('[LOGIN] Exception:', err);
         showError('Connection error. Please check your internet connection.');
       } finally {
         setLoading(false);
