@@ -320,8 +320,8 @@
         // Create Basic Auth header
         const credentials = btoa(`${username}:${password}`);
 
-        // Test authentication by calling a protected endpoint
-        const response = await fetch('/api/health', {
+        // Test authentication by calling the auth verification endpoint
+        const response = await fetch('/api/auth/verify', {
           headers: {
             'Authorization': `Basic ${credentials}`
           }

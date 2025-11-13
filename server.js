@@ -23,13 +23,14 @@ const sessionAuthMiddleware = (req, res, next) => {
   // Skip auth if no credentials configured
   if (!EDITOR_USERNAME || !EDITOR_PASSWORD) return next();
 
-  // Allow access to login page and debug endpoint
+  // Allow access to login page, health check, and debug endpoint
   if (req.path === '/login.html' || req.path === '/login') return next();
+  if (req.path === '/api/health') return next(); // Public healthcheck for Railway
   if (req.path === '/api/debug/auth-config') return next();
 
-  // Skip auth for other API endpoints (they use Bearer token)
-  // EXCEPT /api/health which is used by login page to verify credentials
-  if (req.path.startsWith('/api/') && req.path !== '/api/health') return next();
+  // /api/auth/verify is the ONLY API endpoint that checks Basic Auth
+  // All other API endpoints use Bearer token
+  if (req.path.startsWith('/api/') && req.path !== '/api/auth/verify') return next();
 
   // Check for Basic Auth header (from login page or direct access)
   const authHeader = req.headers['authorization'];
@@ -172,11 +173,18 @@ function interpolateAll(obj, ctx) {
   return obj;
 }
 
-// Health check endpoint - uses sessionAuthMiddleware (Basic Auth) automatically
-// This endpoint is used by login.html to verify credentials
+// Public health check endpoint for Railway healthcheck
+// Does NOT require authentication
 app.get('/api/health', (req, res) => {
-  console.log('[HEALTH CHECK]', req.headers['authorization'] ? 'With auth header' : 'No auth header');
-  res.json({ ok: true });
+  console.log('[HEALTH CHECK] Public endpoint');
+  res.json({ ok: true, timestamp: new Date().toISOString() });
+});
+
+// Authentication verification endpoint for login.html
+// This endpoint REQUIRES Basic Auth and is used to verify credentials
+app.get('/api/auth/verify', (req, res) => {
+  console.log('[AUTH VERIFY] Credentials verified successfully');
+  res.json({ ok: true, authenticated: true });
 });
 
 // Debug endpoint to check environment variables (remove in production)
