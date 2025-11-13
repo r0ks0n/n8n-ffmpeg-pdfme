@@ -23,11 +23,13 @@ const sessionAuthMiddleware = (req, res, next) => {
   // Skip auth if no credentials configured
   if (!EDITOR_USERNAME || !EDITOR_PASSWORD) return next();
 
-  // Skip auth for API endpoints (they use Bearer token)
-  if (req.path.startsWith('/api/')) return next();
-
-  // Allow access to login page
+  // Allow access to login page and debug endpoint
   if (req.path === '/login.html' || req.path === '/login') return next();
+  if (req.path === '/api/debug/auth-config') return next();
+
+  // Skip auth for other API endpoints (they use Bearer token)
+  // EXCEPT /api/health which is used by login page to verify credentials
+  if (req.path.startsWith('/api/') && req.path !== '/api/health') return next();
 
   // Check for Basic Auth header (from login page or direct access)
   const authHeader = req.headers['authorization'];
@@ -170,9 +172,22 @@ function interpolateAll(obj, ctx) {
   return obj;
 }
 
+// Health check endpoint - uses sessionAuthMiddleware (Basic Auth) automatically
+// This endpoint is used by login.html to verify credentials
 app.get('/api/health', (req, res) => {
   console.log('[HEALTH CHECK]', req.headers['authorization'] ? 'With auth header' : 'No auth header');
   res.json({ ok: true });
+});
+
+// Debug endpoint to check environment variables (remove in production)
+app.get('/api/debug/auth-config', (req, res) => {
+  res.json({
+    hasUsername: !!EDITOR_USERNAME,
+    hasPassword: !!EDITOR_PASSWORD,
+    usernameLength: EDITOR_USERNAME ? EDITOR_USERNAME.length : 0,
+    passwordLength: EDITOR_PASSWORD ? EDITOR_PASSWORD.length : 0,
+    authEnabled: !!(EDITOR_USERNAME && EDITOR_PASSWORD)
+  });
 });
 
 // List
