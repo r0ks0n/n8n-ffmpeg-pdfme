@@ -336,7 +336,7 @@
           sessionStorage.setItem('auth_credentials', credentials);
           console.log('[LOGIN] Credentials stored in sessionStorage');
 
-          // Redirect to main editor
+          // Redirect to editor (index.html will check sessionStorage and load editor)
           console.log('[LOGIN] Redirecting to /...');
           window.location.href = '/';
         } else if (response.status === 401) {

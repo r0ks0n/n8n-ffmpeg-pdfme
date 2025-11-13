@@ -23,23 +23,25 @@ const sessionAuthMiddleware = (req, res, next) => {
   // Skip auth if no credentials configured
   if (!EDITOR_USERNAME || !EDITOR_PASSWORD) return next();
 
-  // Allow access to login page, health check, and debug endpoint
+  // Allow access to login page, health check, debug endpoint, and index.html
   if (req.path === '/login.html' || req.path === '/login') return next();
   if (req.path === '/api/health') return next(); // Public healthcheck for Railway
   if (req.path === '/api/debug/auth-config') return next();
+  if (req.path === '/index.html' || req.path === '/') {
+    // Allow index.html to load - it will check sessionStorage and redirect if needed
+    return next();
+  }
 
-  // /api/auth/verify is the ONLY API endpoint that checks Basic Auth
-  // All other API endpoints use Bearer token
+  // Skip Basic Auth for API endpoints EXCEPT /api/auth/verify
+  // /api/auth/verify must check Basic Auth credentials
+  // All other /api/* endpoints use Bearer token (handled by separate `auth` middleware)
   if (req.path.startsWith('/api/') && req.path !== '/api/auth/verify') return next();
 
-  // Check for Basic Auth header (from login page or direct access)
+  // Check for Basic Auth header (for static files like CSS, JS, etc.)
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Basic ')) {
-    // Redirect to login page instead of showing browser dialog
-    if (req.path === '/' || req.path === '/index.html') {
-      return res.redirect('/login.html');
-    }
-    return res.status(401).send('Authentication required');
+    // Redirect to login page
+    return res.redirect('/login.html');
   }
 
   const base64Credentials = authHeader.split(' ')[1];

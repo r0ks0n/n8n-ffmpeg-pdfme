@@ -216,6 +216,18 @@
 
       (async () => {
         try {
+          // Check if user is logged in (has sessionStorage credentials or Bearer token)
+          const storedToken = localStorage.getItem('EDITOR_TOKEN');
+          const storedAuth = sessionStorage.getItem('auth_credentials');
+
+          if (!storedToken && !storedAuth) {
+            console.log('[INDEX] No credentials found, redirecting to login...');
+            window.location.href = '/login.html';
+            return;
+          }
+
+          console.log('[INDEX] Credentials found, loading editor...');
+
           const { uiMod, commonMod } = await loadUIAndCommon();
           const plugins = await loadSchemas();
 
@@ -225,8 +237,8 @@
           // === API & auth ===
           const API = {
             base: location.origin,
-            token: localStorage.getItem('EDITOR_TOKEN') || '',
-            sessionAuth: sessionStorage.getItem('auth_credentials') || ''
+            token: storedToken || '',
+            sessionAuth: storedAuth || ''
           };
           const headers = () => {
             const h = { 'Content-Type': 'application/json' };
