@@ -215,6 +215,34 @@
         return plugins;
       }
 
+      // Load custom fonts from server
+      async function loadCustomFonts() {
+        try {
+          const fontListRes = await fetch('/fonts/fonts.json');
+          if (!fontListRes.ok) {
+            console.log('[FONTS] No fonts.json found, using default fonts');
+            return {};
+          }
+
+          const fontConfig = await fontListRes.json();
+          const fonts = {};
+
+          for (const [fontName, fontPath] of Object.entries(fontConfig)) {
+            console.log(`[FONTS] Loading ${fontName} from ${fontPath}...`);
+            fonts[fontName] = {
+              data: `/fonts/${fontPath}`,
+              fallback: fontName === 'NotoSerifJP' // Set default fallback font
+            };
+          }
+
+          console.log('[FONTS] Loaded fonts:', Object.keys(fonts));
+          return fonts;
+        } catch (e) {
+          console.warn('[FONTS] Error loading fonts:', e);
+          return {};
+        }
+      }
+
       (async () => {
         try {
           // Check if user is logged in (has sessionStorage credentials or Bearer token)
@@ -231,6 +259,7 @@
 
           const { uiMod, commonMod } = await loadUIAndCommon();
           const plugins = await loadSchemas();
+          const customFonts = await loadCustomFonts();
 
           const { Designer } = uiMod;
           const { BLANK_PDF } = commonMod;
@@ -538,7 +567,10 @@
             domContainer: container,
             template: initialTemplate,
             plugins, // VSE sheme po dokumentaciji
-            options: { zoomLevel: 1 }
+            options: {
+              zoomLevel: 1,
+              font: customFonts // Add custom fonts
+            }
           });
 
           // === API: lista in CRUD ===

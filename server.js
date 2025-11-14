@@ -2,6 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { Pool } from 'pg';
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 dotenv.config();
 
@@ -175,6 +181,39 @@ function interpolateAll(obj, ctx) {
   return obj;
 }
 
+// Load custom fonts from public/fonts directory
+function loadCustomFonts() {
+  try {
+    const fontsJsonPath = join(__dirname, 'public', 'fonts', 'fonts.json');
+    if (!existsSync(fontsJsonPath)) {
+      console.log('[FONTS] No fonts.json found, using default fonts');
+      return {};
+    }
+
+    const fontConfig = JSON.parse(readFileSync(fontsJsonPath, 'utf-8'));
+    const fonts = {};
+
+    for (const [fontName, fontPath] of Object.entries(fontConfig)) {
+      const fullPath = join(__dirname, 'public', 'fonts', fontPath);
+      if (existsSync(fullPath)) {
+        console.log(`[FONTS] Loading ${fontName} from ${fontPath}...`);
+        fonts[fontName] = {
+          data: readFileSync(fullPath),
+          fallback: fontName === 'NotoSerifJP' // Set default fallback font
+        };
+      } else {
+        console.warn(`[FONTS] Font file not found: ${fullPath}`);
+      }
+    }
+
+    console.log('[FONTS] Loaded fonts:', Object.keys(fonts));
+    return fonts;
+  } catch (e) {
+    console.warn('[FONTS] Error loading fonts:', e.message);
+    return {};
+  }
+}
+
 // Public health check endpoint for Railway healthcheck
 // Does NOT require authentication
 app.get('/api/health', (req, res) => {
@@ -284,6 +323,9 @@ app.post('/api/render', auth, async (req, res) => {
       svg: schemas.svg
     };
 
+    // Load custom fonts
+    const customFonts = loadCustomFonts();
+
     // Build inputs object that matches schema names with interpolated content
     const pdfs = [];
     for (const inputItem of inputs) {
@@ -320,8 +362,13 @@ app.post('/api/render', auth, async (req, res) => {
 
       console.log('[RENDER] Final PDFme inputs:', JSON.stringify(pdfInputData, null, 2));
 
-      // Generate PDF with original template and our custom inputs
-      const u8 = await generate({ template, inputs: [pdfInputData], plugins });
+      // Generate PDF with original template, custom inputs, and custom fonts
+      const u8 = await generate({
+        template,
+        inputs: [pdfInputData],
+        plugins,
+        options: { font: customFonts }
+      });
       pdfs.push(u8);
     }
 

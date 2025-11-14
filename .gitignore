@@ -1,3 +1,11 @@
 node_modules
 .env
 .DS_Store
+
+# Fonts (large files, not committed - only fonts.json config is tracked)
+public/fonts/*.ttf
+public/fonts/*.otf
+public/fonts/*.woff
+public/fonts/*.woff2
+!public/fonts/fonts.json
+!public/fonts/README.md
