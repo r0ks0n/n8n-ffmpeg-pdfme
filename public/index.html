@@ -163,9 +163,9 @@
 
       async function loadSchemas() {
         const mod = await importFirstOk([
-          'https://cdn.jsdelivr.net/npm/@pdfme/schemas@5/dist/index.es.js',
           'https://esm.sh/@pdfme/schemas@5?bundle&target=es2020',
-          'https://unpkg.com/@pdfme/schemas@5/dist/index.es.js?module'
+          'https://unpkg.com/@pdfme/schemas@5/dist/index.es.js?module',
+          'https://cdn.jsdelivr.net/npm/@pdfme/schemas@5/dist/index.es.js'
         ]);
         const S = (mod?.default ?? mod);
         const P = S.plugins ?? S;
@@ -221,6 +221,13 @@
           const fontListRes = await fetch('/fonts/fonts.json');
           if (!fontListRes.ok) {
             console.log('[FONTS] No fonts.json found, using default fonts');
+            return {};
+          }
+
+          // Check if response is actually JSON
+          const contentType = fontListRes.headers.get('content-type');
+          if (!contentType || !contentType.includes('application/json')) {
+            console.log('[FONTS] fonts.json not found or not JSON, using default fonts');
             return {};
           }
 

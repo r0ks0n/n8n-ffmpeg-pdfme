@@ -29,10 +29,11 @@ const sessionAuthMiddleware = (req, res, next) => {
   // Skip auth if no credentials configured
   if (!EDITOR_USERNAME || !EDITOR_PASSWORD) return next();
 
-  // Allow access to login page, health check, debug endpoint, and index.html
+  // Allow access to login page, health check, debug endpoint, fonts, and index.html
   if (req.path === '/login.html' || req.path === '/login') return next();
   if (req.path === '/api/health') return next(); // Public healthcheck for Railway
   if (req.path === '/api/debug/auth-config') return next();
+  if (req.path.startsWith('/fonts/')) return next(); // Allow font files and fonts.json
   if (req.path === '/index.html' || req.path === '/') {
     // Allow index.html to load - it will check sessionStorage and redirect if needed
     return next();
