@@ -381,11 +381,18 @@ app.post('/api/render', auth, async (req, res) => {
       console.log('[RENDER] Final PDFme inputs:', JSON.stringify(pdfInputData, null, 2));
 
       // Generate PDF with original template, custom inputs, and custom fonts
+      const generateOptions = {};
+
+      // Only add font option if custom fonts are loaded
+      if (Object.keys(customFonts).length > 0) {
+        generateOptions.font = customFonts;
+      }
+
       const u8 = await generate({
         template,
         inputs: [pdfInputData],
         plugins,
-        options: { font: customFonts }
+        options: generateOptions
       });
       pdfs.push(u8);
     }
