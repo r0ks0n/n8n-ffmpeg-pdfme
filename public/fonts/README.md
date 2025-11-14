@@ -1,40 +1,83 @@
 # Custom Fonts for PDFme Editor
 
-## How to Add Custom Fonts
+## Quick Start
 
-1. **Download font files** (TTF or OTF format)
-   - Example sources:
-     - Google Fonts: https://fonts.google.com
-     - Font Squirrel: https://www.fontsquirrel.com
-     - Adobe Fonts: https://fonts.adobe.com
+By default, PDFme uses **Roboto Regular** font. To add custom fonts:
 
-2. **Place font files in this directory**
-   ```
-   public/fonts/
-   ├── fonts.json
-   ├── NotoSerifJP-Regular.ttf
-   ├── Roboto-Regular.ttf
-   └── YourCustomFont.ttf
-   ```
+### 1. Download Font Files
 
-3. **Update `fonts.json`** with your font mappings:
-   ```json
-   {
-     "NotoSerifJP": "NotoSerifJP-Regular.ttf",
-     "Roboto": "Roboto-Regular.ttf",
-     "YourFontName": "YourCustomFont.ttf"
-   }
-   ```
+Get TTF or OTF font files from:
+- **Google Fonts**: https://fonts.google.com (free, open source)
+- **Font Squirrel**: https://www.fontsquirrel.com (free for commercial use)
+- **Adobe Fonts**: https://fonts.adobe.com (subscription)
 
-4. **Restart the server** to load new fonts
-   ```bash
-   npm start
-   ```
+### 2. Place Font Files Here
 
-5. **Use fonts in templates**
-   - In the PDFme Designer UI, fonts will be available in the font dropdown
-   - In templates, set `fontName` property to match the key in `fonts.json`
-   - Example: `{ fontName: "YourFontName", ... }`
+Copy your `.ttf` or `.otf` files to this directory:
+
+```
+public/fonts/
+├── fonts.json          ← Configuration file
+├── Roboto-Bold.ttf     ← Your font file
+└── OpenSans-Regular.ttf ← Another font file
+```
+
+### 3. Update fonts.json
+
+Edit `fonts.json` to register your fonts:
+
+```json
+{
+  "RobotoBold": "Roboto-Bold.ttf",
+  "OpenSans": "OpenSans-Regular.ttf"
+}
+```
+
+**Key rules:**
+- Use any name you want as the key (e.g., `"RobotoBold"`)
+- Value must match the exact filename
+- First font in the list becomes the fallback font
+
+### 4. Restart Server
+
+```bash
+npm start
+```
+
+### 5. Use in Templates
+
+Fonts are now available in:
+- PDFme Designer UI font dropdown
+- Template schemas via `fontName` property:
+  ```javascript
+  {
+    type: "text",
+    fontName: "RobotoBold",  // Matches key in fonts.json
+    content: "Hello World"
+  }
+  ```
+
+## Example Configuration
+
+Here's a complete example with multiple fonts:
+
+**fonts.json:**
+```json
+{
+  "NotoSerifJP": "NotoSerifJP-Regular.ttf",
+  "RobotoBold": "Roboto-Bold.ttf",
+  "OpenSans": "OpenSans-Regular.ttf"
+}
+```
+
+**Directory structure:**
+```
+public/fonts/
+├── fonts.json
+├── NotoSerifJP-Regular.ttf
+├── Roboto-Bold.ttf
+└── OpenSans-Regular.ttf
+```
 
 ## Default Fallback Font
 

@@ -192,6 +192,7 @@ function loadCustomFonts() {
 
     const fontConfig = JSON.parse(readFileSync(fontsJsonPath, 'utf-8'));
     const fonts = {};
+    let fallbackSet = false;
 
     for (const [fontName, fontPath] of Object.entries(fontConfig)) {
       const fullPath = join(__dirname, 'public', 'fonts', fontPath);
@@ -199,10 +200,26 @@ function loadCustomFonts() {
         console.log(`[FONTS] Loading ${fontName} from ${fontPath}...`);
         fonts[fontName] = {
           data: readFileSync(fullPath),
-          fallback: fontName === 'NotoSerifJP' // Set default fallback font
+          fallback: !fallbackSet && fontName === 'NotoSerifJP' // Only first valid font gets fallback
         };
+        if (fontName === 'NotoSerifJP') fallbackSet = true;
       } else {
         console.warn(`[FONTS] Font file not found: ${fullPath}`);
+      }
+    }
+
+    // If no fonts loaded, return empty object (PDFme will use default)
+    if (Object.keys(fonts).length === 0) {
+      console.log('[FONTS] No valid fonts found, using PDFme defaults');
+      return {};
+    }
+
+    // Ensure exactly one font has fallback: true
+    if (!fallbackSet) {
+      const firstFont = Object.keys(fonts);
+      if (firstFont.length > 0) {
+        fonts[firstFont[0]].fallback = true;
+        console.log(`[FONTS] Set ${firstFont[0]} as fallback font`);
       }
     }
 

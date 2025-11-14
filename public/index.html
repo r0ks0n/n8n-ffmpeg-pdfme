@@ -226,13 +226,39 @@
 
           const fontConfig = await fontListRes.json();
           const fonts = {};
+          let fallbackSet = false;
 
           for (const [fontName, fontPath] of Object.entries(fontConfig)) {
             console.log(`[FONTS] Loading ${fontName} from ${fontPath}...`);
-            fonts[fontName] = {
-              data: `/fonts/${fontPath}`,
-              fallback: fontName === 'NotoSerifJP' // Set default fallback font
-            };
+
+            // Check if font file exists by trying to fetch it
+            try {
+              const fontCheck = await fetch(`/fonts/${fontPath}`, { method: 'HEAD' });
+              if (fontCheck.ok) {
+                fonts[fontName] = {
+                  data: `/fonts/${fontPath}`,
+                  fallback: !fallbackSet && fontName === 'NotoSerifJP' // Only first valid font gets fallback
+                };
+                if (fontName === 'NotoSerifJP') fallbackSet = true;
+              } else {
+                console.warn(`[FONTS] Font file not accessible: ${fontPath}`);
+              }
+            } catch (err) {
+              console.warn(`[FONTS] Failed to check font: ${fontPath}`, err);
+            }
+          }
+
+          // If no fonts loaded, return empty object (PDFme will use default)
+          if (Object.keys(fonts).length === 0) {
+            console.log('[FONTS] No valid fonts found, using PDFme defaults');
+            return {};
+          }
+
+          // Ensure exactly one font has fallback: true
+          if (!fallbackSet) {
+            const firstFont = Object.keys(fonts)[0];
+            fonts[firstFont].fallback = true;
+            console.log(`[FONTS] Set ${firstFont} as fallback font`);
           }
 
           console.log('[FONTS] Loaded fonts:', Object.keys(fonts));
