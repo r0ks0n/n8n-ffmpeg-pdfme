@@ -367,6 +367,71 @@ app.post('/api/preview', auth, async (req, res) => {
   }
 });
 
+// Compose - merge multiple PDFs into one
+app.post('/api/compose', auth, async (req, res) => {
+  try {
+    const { pages, fileName } = req.body || {};
+    if (!Array.isArray(pages) || pages.length === 0) {
+      return res.status(400).json({ error: 'pages must be a non-empty array' });
+    }
+
+    console.log(`[COMPOSE] Merging ${pages.length} pages...`);
+
+    const { PDFDocument } = await import('pdf-lib');
+    const mergedPdf = await PDFDocument.create();
+
+    for (let i = 0; i < pages.length; i++) {
+      const page = pages[i];
+
+      // Each page can be { pdf: base64-string } or { pdf: Buffer } or { repeat: N, pdf: ... }
+      let pdfData = page.pdf;
+      if (!pdfData) {
+        console.warn(`[COMPOSE] Page ${i + 1} missing 'pdf' property, skipping...`);
+        continue;
+      }
+
+      // Convert base64 to Buffer if needed
+      let pdfBuffer;
+      if (typeof pdfData === 'string') {
+        // Assume base64
+        pdfBuffer = Buffer.from(pdfData, 'base64');
+      } else if (Buffer.isBuffer(pdfData)) {
+        pdfBuffer = pdfData;
+      } else if (pdfData.type === 'Buffer' && Array.isArray(pdfData.data)) {
+        // Serialized Buffer from JSON
+        pdfBuffer = Buffer.from(pdfData.data);
+      } else {
+        console.warn(`[COMPOSE] Page ${i + 1} has invalid pdf format, skipping...`);
+        continue;
+      }
+
+      // Load PDF
+      const srcPdf = await PDFDocument.load(pdfBuffer);
+      const srcPages = await mergedPdf.copyPages(srcPdf, srcPdf.getPageIndices());
+
+      // Add pages (handle repeat if specified)
+      const repeat = Number(page.repeat) || 1;
+      for (let r = 0; r < repeat; r++) {
+        for (const copiedPage of srcPages) {
+          mergedPdf.addPage(copiedPage);
+        }
+      }
+    }
+
+    const mergedPdfBytes = await mergedPdf.save();
+    const buf = Buffer.from(mergedPdfBytes);
+
+    res.set('Content-Type', 'application/pdf');
+    res.set('Content-Disposition', `inline; filename="${(fileName || 'composed')}.pdf"`);
+    res.send(buf);
+
+    console.log('[COMPOSE] Success! Total pages:', mergedPdf.getPageCount());
+  } catch (e) {
+    console.error('[COMPOSE ERROR]', e);
+    res.status(500).json({ error: 'compose error', message: e.message });
+  }
+});
+
 // Initialize database (skip if DB not available for local testing)
 try {
   await initDb();
