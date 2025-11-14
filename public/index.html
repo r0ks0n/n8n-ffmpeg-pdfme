@@ -596,14 +596,18 @@
 
           // === Mount Designer ===
           const container = document.getElementById('container');
+          const designerOptions = { zoomLevel: 1 };
+
+          // Only add font option if custom fonts are loaded
+          if (Object.keys(customFonts).length > 0) {
+            designerOptions.font = customFonts;
+          }
+
           const designer = new Designer({
             domContainer: container,
             template: initialTemplate,
             plugins, // VSE sheme po dokumentaciji
-            options: {
-              zoomLevel: 1,
-              font: customFonts // Add custom fonts
-            }
+            options: designerOptions
           });
 
           // === API: lista in CRUD ===
