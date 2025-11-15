@@ -238,25 +238,28 @@
           for (const [fontName, fontPath] of Object.entries(fontConfig)) {
             console.log(`[FONTS] Loading ${fontName} from ${fontPath}...`);
 
-            // Check if font file exists by trying to fetch it
+            // Fetch font file and read as ArrayBuffer (required by PDFme)
             try {
-              const fontCheck = await fetch(`/fonts/${fontPath}`, { method: 'HEAD' });
-              if (fontCheck.ok) {
+              const fontRes = await fetch(`/fonts/${fontPath}`);
+              if (fontRes.ok) {
+                const fontData = await fontRes.arrayBuffer();
+
                 // First valid font becomes fallback
                 const isFallback = !fallbackSet;
                 fonts[fontName] = {
-                  data: `/fonts/${fontPath}`,
+                  data: fontData,  // Binary ArrayBuffer required by PDFme
                   fallback: isFallback
                 };
                 if (isFallback) {
                   fallbackSet = true;
                   console.log(`[FONTS] Set ${fontName} as fallback font`);
                 }
+                console.log(`[FONTS] Loaded ${fontName} (${(fontData.byteLength / 1024).toFixed(1)}KB)`);
               } else {
-                console.warn(`[FONTS] Font file not accessible: ${fontPath}`);
+                console.warn(`[FONTS] Font file not accessible: ${fontPath} (${fontRes.status})`);
               }
             } catch (err) {
-              console.warn(`[FONTS] Failed to check font: ${fontPath}`, err);
+              console.warn(`[FONTS] Failed to load font: ${fontPath}`, err);
             }
           }
 
