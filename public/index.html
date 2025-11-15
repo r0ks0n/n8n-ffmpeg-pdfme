@@ -370,7 +370,8 @@
 
           // === State ===
           let currentId = null;
-          let secondBasePdf = null; // dataURL
+          let firstBasePdf = null; // Page 1 base PDF (dataURL)
+          let secondBasePdf = null; // Page 2+ base PDF (dataURL)
 
           // === Sample JSON / variables panel ===
           const SAMPLE_JSON_KEY = 'PDFME_SAMPLE_JSON';
@@ -749,29 +750,40 @@
             if (currentEditingPage === 1 && pageNumber === 2) {
               // Switching from Page 1 to Page 2: save Page 1 schema
               savedPage1Schema = currentSchemas[0] || [];
+              console.log('[PAGE-SWITCH] Saved Page 1 schema with', savedPage1Schema.length, 'fields');
             } else if (currentEditingPage === 2 && pageNumber === 1) {
               // Switching from Page 2 to Page 1: save Page 2 schema
               savedPage2Schema = currentSchemas[0] || [];
+              console.log('[PAGE-SWITCH] Saved Page 2 schema with', savedPage2Schema.length, 'fields');
             }
 
             currentEditingPage = pageNumber;
 
             if (pageNumber === 1) {
-              // Show only Page 1
-              const currentBasePdf = Array.isArray(currentTemplate.basePdf) ? currentTemplate.basePdf[0] : currentTemplate.basePdf;
+              // Show only Page 1 with its PDF
+              if (!firstBasePdf) {
+                alert('Page 1 base PDF not found. Please reload the template.');
+                return;
+              }
               const page1Template = {
                 ...currentTemplate,
-                basePdf: currentBasePdf,
+                basePdf: firstBasePdf,
                 schemas: [savedPage1Schema || []]
               };
+              console.log('[PAGE-SWITCH] Loading Page 1 with', savedPage1Schema.length, 'fields');
               recreateDesigner(page1Template);
             } else {
-              // Show Page 2+ alone (Designer doesn't support basePdf arrays)
+              // Show Page 2+ alone with its PDF
+              if (!secondBasePdf) {
+                alert('Page 2+ base PDF not found.');
+                return;
+              }
               const page2Template = {
                 ...currentTemplate,
                 basePdf: secondBasePdf,
                 schemas: [savedPage2Schema || []]
               };
+              console.log('[PAGE-SWITCH] Loading Page 2+ with', savedPage2Schema.length, 'fields');
               recreateDesigner(page2Template);
             }
 
@@ -798,10 +810,6 @@
             // If in multi-page mode, build complete template with both pages
             if (isMultiPageMode()) {
               const currentSchemas = template.schemas || [[]];
-              const currentBasePdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
-
-              // Get the first base PDF (Page 1)
-              const firstBasePdf = currentEditingPage === 1 ? currentBasePdf : currentBasePdf;
 
               // Build complete schemas array (Page 1 + Page 2)
               let page1Schema, page2Schema;
@@ -831,6 +839,7 @@
           document.getElementById('btnNew').onclick = () => {
             designer.updateTemplate(initialTemplate);
             document.getElementById('tplName').value = '';
+            firstBasePdf = null;
             secondBasePdf = null;
             setBaseStatus(1, false);
             setBaseStatus(2, false);
@@ -900,9 +909,11 @@
               const { name, template, id: loadedId } = await res.json();
               document.getElementById('tplName').value = name;
 
-              // Extract secondBasePdf if present
+              // Extract base PDFs
               secondBasePdf = typeof template._secondBasePdf === 'string' ? template._secondBasePdf : null;
-              setBaseStatus(1, typeof template.basePdf === 'string' || Array.isArray(template.basePdf));
+              firstBasePdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
+
+              setBaseStatus(1, !!firstBasePdf);
               setBaseStatus(2, !!secondBasePdf);
 
               // Load template - if multi-page mode, start on Page 1
@@ -914,11 +925,12 @@
                 savedPage1Schema = schemas.length >= 1 ? schemas[0] : [];
                 savedPage2Schema = schemas.length >= 2 ? schemas[1] : [];
 
+                console.log('[LOAD] Multi-page mode: Page 1 has', savedPage1Schema.length, 'fields, Page 2 has', savedPage2Schema.length, 'fields');
+
                 // Show only Page 1 initially
-                const currentBasePdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
                 const page1Template = {
                   ...template,
-                  basePdf: currentBasePdf,
+                  basePdf: firstBasePdf,
                   schemas: [savedPage1Schema]
                 };
                 designer.updateTemplate(page1Template);
@@ -926,6 +938,7 @@
                 // Single page mode
                 savedPage1Schema = [];
                 savedPage2Schema = [];
+                console.log('[LOAD] Single-page mode');
                 designer.updateTemplate(template);
               }
 
@@ -959,6 +972,7 @@
               setCurrentId(null);
               document.getElementById('tplName').value = '';
               designer.updateTemplate(initialTemplate);
+              firstBasePdf = null;
               secondBasePdf = null;
               setBaseStatus(1, false);
               setBaseStatus(2, false);
@@ -992,6 +1006,7 @@
             const f = document.getElementById('base1File').files?.[0];
             if (!f) return alert('Izberi PDF datoteko.');
             const dataUrl = await fileToDataUrl(f);
+            firstBasePdf = dataUrl;  // Store in variable
             const tpl = designer.getTemplate();
             tpl.basePdf = dataUrl;
             designer.updateTemplate(tpl);
