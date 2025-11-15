@@ -90,16 +90,17 @@
 
       <div class="filehint">Če dokument preseže 1 stran, se na vseh naslednjih straneh uporabi Page&nbsp;2+ base.</div>
 
-      <!-- Multi-Page Text Layout Settings -->
-      <div class="baseGroup" style="border-left: 2px solid #ddd; padding-left: 12px; margin-left: 12px;">
-        <span class="label">Multi-Page Text Layout:</span>
-        <label style="display: inline-flex; align-items: center; gap: 6px; margin-right: 15px;">
-          <input type="checkbox" id="enableMultiPageLayout" style="width: auto;" />
-          <span style="font-size: 13px;">Enable different layout for continuation pages</span>
-        </label>
-
-        <span id="multiPageHint" style="display: none; font-size: 12px; color: #059669; background: #d1fae5; padding: 4px 8px; border-radius: 4px;">
-          ℹ️ Page 2 added to designer - position text frame with drag & drop
+      <!-- Page Layout Switch (shows when Page 2+ base is set) -->
+      <div id="pageLayoutSwitch" class="baseGroup" style="border-left: 2px solid #ddd; padding-left: 12px; margin-left: 12px; display: none;">
+        <span class="label">Edit Layout:</span>
+        <button id="btnEditPage1" style="background:#dbeafe;border-color:#93c5fd;padding:6px 12px;font-size:13px;">
+          📄 Page 1
+        </button>
+        <button id="btnEditPage2" style="background:#e0e7ff;border-color:#c7d2fe;padding:6px 12px;font-size:13px;">
+          📑 Page 2+
+        </button>
+        <span id="currentPageIndicator" style="font-size: 12px; color: #059669; background: #d1fae5; padding: 4px 8px; border-radius: 4px; margin-left: 8px;">
+          Editing: Page 1
         </span>
       </div>
     </div>
@@ -657,11 +658,8 @@
 
           async function createTemplate() {
             const name = document.getElementById('tplName').value || 'Untitled Template';
-            let template = designer.getTemplate();
+            let template = getCompleteTemplate();
             if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
-
-            // Save multi-page enabled flag
-            template = saveMultiPageConfig();
 
             const res = await fetch(`${API.base}/api/templates`, {
               method: 'POST', headers: headers(), body: JSON.stringify({ name, template })
@@ -674,11 +672,8 @@
 
           async function updateTemplate(id) {
             const name = document.getElementById('tplName').value || 'Untitled Template';
-            let template = designer.getTemplate();
+            let template = getCompleteTemplate();
             if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
-
-            // Save multi-page enabled flag
-            template = saveMultiPageConfig();
 
             const res = await fetch(`${API.base}/api/templates/${id}`, {
               method: 'PUT', headers: headers(), body: JSON.stringify({ name, template })
@@ -696,117 +691,131 @@
             throw new Error('Delete failed');
           }
 
-          // === Multi-Page Layout Helpers ===
-          function isMultiPageEnabled() {
-            return document.getElementById('enableMultiPageLayout').checked;
+          // === Page Layout Switch ===
+          let currentEditingPage = 1; // 1 = Page 1, 2 = Page 2+
+          let savedPage2Schema = []; // Store Page 2 schema when switching to Page 1
+
+          // Check if multi-page mode is active (Page 2+ PDF is loaded)
+          function isMultiPageMode() {
+            return !!secondBasePdf;
           }
 
-          function toggleMultiPageLayout(enable) {
-            const checkbox = document.getElementById('enableMultiPageLayout');
-            const hint = document.getElementById('multiPageHint');
+          // Update switch UI visibility and state
+          function updatePageSwitchUI() {
+            const switchDiv = document.getElementById('pageLayoutSwitch');
+            const indicator = document.getElementById('currentPageIndicator');
+            const btn1 = document.getElementById('btnEditPage1');
+            const btn2 = document.getElementById('btnEditPage2');
 
-            checkbox.checked = enable;
-            hint.style.display = enable ? '' : 'none';
+            if (isMultiPageMode()) {
+              switchDiv.style.display = '';
+              indicator.textContent = `Editing: ${currentEditingPage === 1 ? 'Page 1' : 'Page 2+'}`;
 
-            if (enable) {
-              ensurePage2Exists();
+              // Highlight active button
+              if (currentEditingPage === 1) {
+                btn1.style.background = '#3b82f6';
+                btn1.style.color = '#ffffff';
+                btn1.style.borderColor = '#2563eb';
+                btn2.style.background = '#e0e7ff';
+                btn2.style.color = '#000000';
+                btn2.style.borderColor = '#c7d2fe';
+              } else {
+                btn1.style.background = '#dbeafe';
+                btn1.style.color = '#000000';
+                btn1.style.borderColor = '#93c5fd';
+                btn2.style.background = '#6366f1';
+                btn2.style.color = '#ffffff';
+                btn2.style.borderColor = '#4f46e5';
+              }
             } else {
-              removePage2();
+              switchDiv.style.display = 'none';
+              currentEditingPage = 1;
             }
           }
 
-          function ensurePage2Exists() {
-            const template = designer.getTemplate();
-            const schemas = template.schemas || [[]];
-
-            // Check if Page 2 already exists
-            if (schemas.length >= 2) {
-              console.log('[MULTI-PAGE] Page 2 already exists');
+          // Switch to editing Page 1 or Page 2+
+          function switchToPage(pageNumber) {
+            if (!isMultiPageMode()) {
+              alert('Upload Page 2+ base PDF first to enable multi-page layout editing.');
               return;
             }
 
-            // Add Page 2 with empty schema (user will add fields via drag & drop)
-            schemas.push([]);
-            template.schemas = schemas;
+            // Save current page schema before switching
+            const currentTemplate = designer.getTemplate();
+            const currentSchemas = currentTemplate.schemas || [[]];
 
-            // Set basePdf as array if secondBasePdf exists
-            // PDFme Designer DOES support basePdf arrays, but we need to recreate the designer
-            if (secondBasePdf) {
-              const currentBasePdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
-              template.basePdf = [currentBasePdf, secondBasePdf];
+            if (currentEditingPage === 2 && currentSchemas.length >= 2) {
+              // Save Page 2 schema before switching to Page 1
+              savedPage2Schema = currentSchemas[1] || [];
+            }
 
-              // Recreate designer with new template
-              recreateDesigner(template);
-              console.log('[MULTI-PAGE] Added Page 2 with custom base PDF');
+            currentEditingPage = pageNumber;
+            const currentBasePdf = Array.isArray(currentTemplate.basePdf) ? currentTemplate.basePdf[0] : currentTemplate.basePdf;
+
+            if (pageNumber === 1) {
+              // Show only Page 1
+              const page1Template = {
+                ...currentTemplate,
+                basePdf: currentBasePdf,
+                schemas: [currentSchemas[0] || []]
+              };
+              recreateDesigner(page1Template);
             } else {
-              designer.updateTemplate(template);
-              console.log('[MULTI-PAGE] Added Page 2 (no custom base PDF set)');
+              // Show Page 1 and Page 2 with correct base PDFs
+              const page2Template = {
+                ...currentTemplate,
+                basePdf: [currentBasePdf, secondBasePdf],
+                schemas: [currentSchemas[0] || [], savedPage2Schema]
+              };
+              recreateDesigner(page2Template);
             }
+
+            updatePageSwitchUI();
+            console.log(`[PAGE-SWITCH] Switched to editing Page ${pageNumber}`);
           }
 
-          function removePage2() {
-            const template = designer.getTemplate();
-            const schemas = template.schemas || [[]];
-
-            // Keep only first page
-            if (schemas.length > 1) {
-              template.schemas = [schemas[0]];
-
-              // Reset basePdf to single page
-              if (Array.isArray(template.basePdf)) {
-                template.basePdf = template.basePdf[0];
-              }
-
-              // Recreate designer with updated template
-              recreateDesigner(template);
-              console.log('[MULTI-PAGE] Removed Page 2 from template');
-            }
-          }
-
-          // Recreate designer instance (needed for basePdf array changes)
+          // Recreate designer instance (needed for basePdf changes)
           function recreateDesigner(newTemplate) {
-            // Destroy current designer by clearing container
             container.innerHTML = '';
-
-            // Create new designer instance with updated template
             designer = new Designer({
               domContainer: container,
               template: newTemplate,
               plugins,
               options: designerOptions
             });
-
-            console.log('[MULTI-PAGE] Designer recreated with basePdf:', Array.isArray(newTemplate.basePdf) ? `array (${newTemplate.basePdf.length} pages)` : 'single page');
+            console.log('[DESIGNER] Recreated with', Array.isArray(newTemplate.basePdf) ? `${newTemplate.basePdf.length} pages` : '1 page');
           }
 
-          function saveMultiPageConfig() {
+          // Get complete template (merge all pages for saving)
+          function getCompleteTemplate() {
             const template = designer.getTemplate();
-            if (isMultiPageEnabled()) {
-              template._multiPageEnabled = true;
-            } else {
-              delete template._multiPageEnabled;
-            }
-            return template;
-          }
 
-          function restoreMultiPageConfig(template) {
-            const enabled = template._multiPageEnabled === true;
-            const schemas = template.schemas || [[]];
-            const hasPage2 = schemas.length >= 2;
-
-            // Update checkbox and hint
-            const checkbox = document.getElementById('enableMultiPageLayout');
-            const hint = document.getElementById('multiPageHint');
-            checkbox.checked = enabled;
-            hint.style.display = (enabled && hasPage2) ? '' : 'none';
-
-            // If enabled and has Page 2, recreate designer with basePdf array
-            if (enabled && hasPage2 && secondBasePdf) {
+            // If in multi-page mode, build complete template with both pages
+            if (isMultiPageMode()) {
+              const schemas = template.schemas || [[]];
               const currentBasePdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
-              template.basePdf = [currentBasePdf, secondBasePdf];
-              recreateDesigner(template);
-              console.log('[MULTI-PAGE] Restored multi-page layout with custom base PDF');
+
+              // Build complete schemas array
+              const completeSchemas = [schemas[0] || []];
+
+              // Add Page 2 schema
+              if (currentEditingPage === 1) {
+                // Currently editing Page 1, use saved Page 2 schema
+                completeSchemas.push(savedPage2Schema);
+              } else {
+                // Currently editing Page 2, use current Page 2 from designer
+                completeSchemas.push(schemas[1] || []);
+              }
+
+              // Return complete template with both pages
+              return {
+                ...template,
+                basePdf: [currentBasePdf, secondBasePdf],
+                schemas: completeSchemas
+              };
             }
+
+            return template;
           }
 
           // === UI handlers ===
@@ -816,7 +825,8 @@
             secondBasePdf = null;
             setBaseStatus(1, false);
             setBaseStatus(2, false);
-            toggleMultiPageLayout(false);
+            currentEditingPage = 1;
+            updatePageSwitchUI();
             setCurrentId(null);
           };
 
@@ -878,14 +888,35 @@
               }
               const { name, template, id: loadedId } = await res.json();
               document.getElementById('tplName').value = name;
-              designer.updateTemplate(template);
+
+              // Extract secondBasePdf if present
               secondBasePdf = typeof template._secondBasePdf === 'string' ? template._secondBasePdf : null;
-              setBaseStatus(1, typeof template.basePdf === 'string');
+              setBaseStatus(1, typeof template.basePdf === 'string' || Array.isArray(template.basePdf));
               setBaseStatus(2, !!secondBasePdf);
 
-              // Restore multi-page config
-              restoreMultiPageConfig(template);
+              // Load template - if multi-page mode, start on Page 1
+              currentEditingPage = 1;
+              const schemas = template.schemas || [[]];
 
+              if (isMultiPageMode()) {
+                // Save Page 2 schema for later use
+                savedPage2Schema = schemas.length >= 2 ? schemas[1] : [];
+
+                // Show only Page 1 initially
+                const currentBasePdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
+                const page1Template = {
+                  ...template,
+                  basePdf: currentBasePdf,
+                  schemas: [schemas[0] || []]
+                };
+                designer.updateTemplate(page1Template);
+              } else {
+                // Single page mode
+                savedPage2Schema = [];
+                designer.updateTemplate(template);
+              }
+
+              updatePageSwitchUI();
               setCurrentId(loadedId || id);
             } catch (e) {
               showErr(e);
@@ -918,7 +949,8 @@
               secondBasePdf = null;
               setBaseStatus(1, false);
               setBaseStatus(2, false);
-              toggleMultiPageLayout(false);
+              currentEditingPage = 1;
+              updatePageSwitchUI();
               await refreshList();
               alert('Deleted.');
             } catch (e) { showErr(e); alert(e.message || 'Delete failed'); }
@@ -972,11 +1004,14 @@
             if (!f) return alert('Izberi PDF datoteko.');
             secondBasePdf = await fileToDataUrl(f);
             setBaseStatus(2, true);
+            updatePageSwitchUI();  // Show page switch buttons
             alert('Second-page Base PDF set.');
           };
           document.getElementById('btnBase2Clear').onclick = () => {
             secondBasePdf = null;
             setBaseStatus(2, false);
+            currentEditingPage = 1;
+            updatePageSwitchUI();  // Hide page switch buttons
           };
           document.getElementById('btnBase2Download').onclick = () => {
             if (secondBasePdf) {
@@ -1149,9 +1184,13 @@
             );
           };
 
-          // Multi-Page Layout checkbox toggle
-          document.getElementById('enableMultiPageLayout').onchange = function() {
-            toggleMultiPageLayout(this.checked);
+          // Page Layout Switch button handlers
+          document.getElementById('btnEditPage1').onclick = () => {
+            switchToPage(1);
+          };
+
+          document.getElementById('btnEditPage2').onclick = () => {
+            switchToPage(2);
           };
 
           // Init
@@ -1159,7 +1198,8 @@
           setCurrentId(null);
           setBaseStatus(1, false);
           setBaseStatus(2, false);
-          toggleMultiPageLayout(false);
+          currentEditingPage = 1;
+          updatePageSwitchUI();
           document.getElementById('tplName').value = '';
           refreshList();
         } catch (e) {
