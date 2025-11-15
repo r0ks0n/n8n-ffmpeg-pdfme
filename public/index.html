@@ -693,6 +693,7 @@
 
           // === Page Layout Switch ===
           let currentEditingPage = 1; // 1 = Page 1, 2 = Page 2+
+          let savedPage1Schema = []; // Store Page 1 schema when switching to Page 2
           let savedPage2Schema = []; // Store Page 2 schema when switching to Page 1
 
           // Check if multi-page mode is active (Page 2+ PDF is loaded)
@@ -744,40 +745,33 @@
             const currentTemplate = designer.getTemplate();
             const currentSchemas = currentTemplate.schemas || [[]];
 
-            if (currentEditingPage === 2 && currentSchemas.length >= 2) {
-              // Save Page 2 schema before switching to Page 1
-              savedPage2Schema = currentSchemas[1] || [];
+            // Save schema from current page before switching
+            if (currentEditingPage === 1 && pageNumber === 2) {
+              // Switching from Page 1 to Page 2: save Page 1 schema
+              savedPage1Schema = currentSchemas[0] || [];
+            } else if (currentEditingPage === 2 && pageNumber === 1) {
+              // Switching from Page 2 to Page 1: save Page 2 schema
+              savedPage2Schema = currentSchemas[0] || [];
             }
 
             currentEditingPage = pageNumber;
-            const currentBasePdf = Array.isArray(currentTemplate.basePdf) ? currentTemplate.basePdf[0] : currentTemplate.basePdf;
 
             if (pageNumber === 1) {
               // Show only Page 1
+              const currentBasePdf = Array.isArray(currentTemplate.basePdf) ? currentTemplate.basePdf[0] : currentTemplate.basePdf;
               const page1Template = {
                 ...currentTemplate,
                 basePdf: currentBasePdf,
-                schemas: [currentSchemas[0] || []]
+                schemas: [savedPage1Schema || []]
               };
               recreateDesigner(page1Template);
             } else {
-              // Show Page 1 and Page 2 with correct base PDFs
-              console.log('[DEBUG] currentBasePdf:', typeof currentBasePdf, currentBasePdf?.substring(0, 50));
-              console.log('[DEBUG] secondBasePdf:', typeof secondBasePdf, secondBasePdf?.substring(0, 50));
-              console.log('[DEBUG] secondBasePdf exists:', !!secondBasePdf);
-              console.log('[DEBUG] currentBasePdf exists:', !!currentBasePdf);
-
+              // Show Page 2+ alone (Designer doesn't support basePdf arrays)
               const page2Template = {
                 ...currentTemplate,
-                basePdf: [currentBasePdf, secondBasePdf],
-                schemas: [currentSchemas[0] || [], savedPage2Schema]
+                basePdf: secondBasePdf,
+                schemas: [savedPage2Schema || []]
               };
-
-              console.log('[DEBUG] page2Template.basePdf is array:', Array.isArray(page2Template.basePdf));
-              console.log('[DEBUG] page2Template.basePdf length:', page2Template.basePdf.length);
-              console.log('[DEBUG] page2Template.basePdf[0] type:', typeof page2Template.basePdf[0]);
-              console.log('[DEBUG] page2Template.basePdf[1] type:', typeof page2Template.basePdf[1]);
-
               recreateDesigner(page2Template);
             }
 
@@ -803,26 +797,30 @@
 
             // If in multi-page mode, build complete template with both pages
             if (isMultiPageMode()) {
-              const schemas = template.schemas || [[]];
+              const currentSchemas = template.schemas || [[]];
               const currentBasePdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
 
-              // Build complete schemas array
-              const completeSchemas = [schemas[0] || []];
+              // Get the first base PDF (Page 1)
+              const firstBasePdf = currentEditingPage === 1 ? currentBasePdf : currentBasePdf;
 
-              // Add Page 2 schema
+              // Build complete schemas array (Page 1 + Page 2)
+              let page1Schema, page2Schema;
+
               if (currentEditingPage === 1) {
-                // Currently editing Page 1, use saved Page 2 schema
-                completeSchemas.push(savedPage2Schema);
+                // Currently editing Page 1
+                page1Schema = currentSchemas[0] || [];
+                page2Schema = savedPage2Schema || [];
               } else {
-                // Currently editing Page 2, use current Page 2 from designer
-                completeSchemas.push(schemas[1] || []);
+                // Currently editing Page 2
+                page1Schema = savedPage1Schema || [];
+                page2Schema = currentSchemas[0] || [];
               }
 
-              // Return complete template with both pages
+              // Return complete template with both pages (basePdf array for Generator)
               return {
                 ...template,
-                basePdf: [currentBasePdf, secondBasePdf],
-                schemas: completeSchemas
+                basePdf: [firstBasePdf, secondBasePdf],
+                schemas: [page1Schema, page2Schema]
               };
             }
 
@@ -837,6 +835,8 @@
             setBaseStatus(1, false);
             setBaseStatus(2, false);
             currentEditingPage = 1;
+            savedPage1Schema = [];
+            savedPage2Schema = [];
             updatePageSwitchUI();
             setCurrentId(null);
           };
@@ -910,7 +910,8 @@
               const schemas = template.schemas || [[]];
 
               if (isMultiPageMode()) {
-                // Save Page 2 schema for later use
+                // Initialize saved schemas from loaded template
+                savedPage1Schema = schemas.length >= 1 ? schemas[0] : [];
                 savedPage2Schema = schemas.length >= 2 ? schemas[1] : [];
 
                 // Show only Page 1 initially
@@ -918,11 +919,12 @@
                 const page1Template = {
                   ...template,
                   basePdf: currentBasePdf,
-                  schemas: [schemas[0] || []]
+                  schemas: [savedPage1Schema]
                 };
                 designer.updateTemplate(page1Template);
               } else {
                 // Single page mode
+                savedPage1Schema = [];
                 savedPage2Schema = [];
                 designer.updateTemplate(template);
               }
@@ -961,6 +963,8 @@
               setBaseStatus(1, false);
               setBaseStatus(2, false);
               currentEditingPage = 1;
+              savedPage1Schema = [];
+              savedPage2Schema = [];
               updatePageSwitchUI();
               await refreshList();
               alert('Deleted.');
