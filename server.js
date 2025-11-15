@@ -197,6 +197,122 @@ function interpolateAll(obj, ctx) {
   return obj;
 }
 
+// ---- Multi-page text splitting helpers ----
+/**
+ * Calculate approximate character capacity for a text frame
+ * @param {number} width - Frame width in mm
+ * @param {number} height - Frame height in mm
+ * @param {number} fontSize - Font size in pt
+ * @param {number} lineHeight - Line height multiplier (e.g., 1.5)
+ * @param {number} characterSpacing - Character spacing in pt
+ * @returns {number} - Estimated character capacity
+ */
+function calculateTextCapacity(width, height, fontSize = 11, lineHeight = 1.5, characterSpacing = 0) {
+  // Convert mm to pt (1mm ≈ 2.83465pt)
+  const widthPt = width * 2.83465;
+  const heightPt = height * 2.83465;
+
+  // Average character width (approximate, varies by font)
+  const avgCharWidth = fontSize * 0.5 + characterSpacing;
+
+  // Calculate characters per line
+  const charsPerLine = Math.floor(widthPt / avgCharWidth);
+
+  // Calculate lines per page
+  const lineHeightPt = fontSize * lineHeight;
+  const linesPerPage = Math.floor(heightPt / lineHeightPt);
+
+  // Total capacity (conservative estimate)
+  const capacity = charsPerLine * linesPerPage;
+
+  console.log(`[TEXT CAPACITY] Width:${width}mm Height:${height}mm Font:${fontSize}pt -> ${charsPerLine} chars/line × ${linesPerPage} lines = ${capacity} chars`);
+
+  return capacity;
+}
+
+/**
+ * Split text intelligently at word/paragraph boundaries
+ * @param {string} text - Full text to split
+ * @param {number} firstPageCapacity - Character capacity for first page
+ * @param {number} continuationPageCapacity - Character capacity for continuation pages
+ * @returns {string[]} - Array of text chunks for each page
+ */
+function splitTextIntelligently(text, firstPageCapacity, continuationPageCapacity) {
+  if (!text || typeof text !== 'string') return [text || ''];
+
+  // If text fits on first page, no splitting needed
+  if (text.length <= firstPageCapacity) {
+    console.log(`[TEXT SPLIT] Text fits on single page (${text.length} chars <= ${firstPageCapacity} capacity)`);
+    return [text];
+  }
+
+  const pages = [];
+  let remainingText = text;
+  let currentCapacity = firstPageCapacity;
+  let pageNum = 1;
+
+  while (remainingText.length > 0) {
+    console.log(`[TEXT SPLIT] Page ${pageNum}: Capacity=${currentCapacity}, Remaining=${remainingText.length} chars`);
+
+    if (remainingText.length <= currentCapacity) {
+      // Remaining text fits on this page
+      pages.push(remainingText);
+      break;
+    }
+
+    // Find a good break point (prefer paragraph, then sentence, then word)
+    let breakPoint = currentCapacity;
+
+    // Look for paragraph break (double newline) within capacity
+    const paragraphBreak = remainingText.lastIndexOf('\n\n', currentCapacity);
+    if (paragraphBreak > currentCapacity * 0.5) {
+      // Found paragraph break in reasonable position (> 50% of capacity)
+      breakPoint = paragraphBreak + 2; // Include the newlines
+      console.log(`[TEXT SPLIT] Page ${pageNum}: Breaking at paragraph (pos ${breakPoint})`);
+    }
+    // Look for sentence break (. or ! or ?) within capacity
+    else {
+      const sentenceBreak = Math.max(
+        remainingText.lastIndexOf('. ', currentCapacity),
+        remainingText.lastIndexOf('! ', currentCapacity),
+        remainingText.lastIndexOf('? ', currentCapacity)
+      );
+      if (sentenceBreak > currentCapacity * 0.6) {
+        // Found sentence break in reasonable position (> 60% of capacity)
+        breakPoint = sentenceBreak + 2; // Include period and space
+        console.log(`[TEXT SPLIT] Page ${pageNum}: Breaking at sentence (pos ${breakPoint})`);
+      }
+      // Look for word break (space) within capacity
+      else {
+        const wordBreak = remainingText.lastIndexOf(' ', currentCapacity);
+        if (wordBreak > currentCapacity * 0.7) {
+          // Found word break in reasonable position (> 70% of capacity)
+          breakPoint = wordBreak + 1; // Include the space
+          console.log(`[TEXT SPLIT] Page ${pageNum}: Breaking at word (pos ${breakPoint})`);
+        } else {
+          // Fallback: hard break at capacity (avoid cutting words if possible)
+          console.log(`[TEXT SPLIT] Page ${pageNum}: Hard break at capacity (no good break point found)`);
+        }
+      }
+    }
+
+    // Extract chunk for this page
+    const chunk = remainingText.substring(0, breakPoint).trim();
+    pages.push(chunk);
+
+    // Update remaining text
+    remainingText = remainingText.substring(breakPoint).trim();
+
+    // Switch to continuation page capacity for subsequent pages
+    currentCapacity = continuationPageCapacity;
+    pageNum++;
+  }
+
+  console.log(`[TEXT SPLIT] Split into ${pages.length} pages: ${pages.map((p, i) => `Page${i + 1}=${p.length}chars`).join(', ')}`);
+
+  return pages;
+}
+
 // Load custom fonts from public/fonts directory
 function loadCustomFonts() {
   try {
@@ -400,7 +516,104 @@ app.post('/api/render', auth, async (req, res) => {
 
       console.log('[RENDER] Final PDFme inputs:', JSON.stringify(pdfInputData, null, 2));
 
-      // Generate PDF with original template, custom inputs, and custom fonts
+      // Check if multi-page text layout is enabled
+      let finalTemplate = template;
+      if (template._multiPageConfig && template._multiPageConfig.enabled) {
+        console.log('[MULTI-PAGE] Config detected:', JSON.stringify(template._multiPageConfig, null, 2));
+
+        const config = template._multiPageConfig;
+        const firstPageSchema = template.schemas && template.schemas[0] ? template.schemas[0] : [];
+
+        // Find multiVariableText fields in first page
+        const textFields = firstPageSchema.filter(field => field.type === 'multiVariableText');
+
+        if (textFields.length > 0) {
+          console.log(`[MULTI-PAGE] Found ${textFields.length} multiVariableText fields`);
+
+          // Process each text field for potential splitting
+          for (const textField of textFields) {
+            const fieldName = textField.name;
+            const fieldText = pdfInputData[fieldName];
+
+            if (!fieldText || typeof fieldText !== 'string') continue;
+
+            console.log(`[MULTI-PAGE] Processing field "${fieldName}" with ${fieldText.length} characters`);
+
+            // Calculate text capacity for first page and continuation pages
+            const firstPageCapacity = calculateTextCapacity(
+              textField.width || 170,
+              config.page1.height || 180,
+              textField.fontSize || 11,
+              textField.lineHeight || 1.5,
+              textField.characterSpacing || 0
+            );
+
+            const continuationCapacity = calculateTextCapacity(
+              textField.width || 170,
+              config.page2Plus.height || 260,
+              textField.fontSize || 11,
+              textField.lineHeight || 1.5,
+              textField.characterSpacing || 0
+            );
+
+            // Split text if it exceeds first page capacity
+            if (fieldText.length > firstPageCapacity) {
+              const textChunks = splitTextIntelligently(fieldText, firstPageCapacity, continuationCapacity);
+              console.log(`[MULTI-PAGE] Split text into ${textChunks.length} pages`);
+
+              // Create new schemas array with dynamic pages
+              const newSchemas = [];
+
+              // First page (keep original schema, but update text position if needed)
+              const firstPageSchemas = firstPageSchema.map(field => {
+                if (field.name === fieldName) {
+                  return {
+                    ...field,
+                    position: { x: field.position.x, y: config.page1.y },
+                    height: config.page1.height
+                  };
+                }
+                return field;
+              });
+              newSchemas.push(firstPageSchemas);
+
+              // Update input data for first page
+              pdfInputData[fieldName] = textChunks[0];
+
+              // Create continuation pages
+              for (let i = 1; i < textChunks.length; i++) {
+                const continuationField = {
+                  ...textField,
+                  name: `${fieldName}_page${i + 1}`,
+                  position: { x: textField.position.x, y: config.page2Plus.y },
+                  height: config.page2Plus.height
+                };
+
+                // Only include the text field on continuation pages
+                newSchemas.push([continuationField]);
+
+                // Add continuation text to input data
+                pdfInputData[`${fieldName}_page${i + 1}`] = textChunks[i];
+              }
+
+              // Update template with new schemas
+              finalTemplate = {
+                ...template,
+                schemas: newSchemas,
+                // Use _secondBasePdf for continuation pages if available
+                basePdf: template.basePdf
+              };
+
+              console.log(`[MULTI-PAGE] Generated ${newSchemas.length} page schemas`);
+              break; // Only process first multiVariableText field for now
+            } else {
+              console.log(`[MULTI-PAGE] Text fits on single page, no splitting needed`);
+            }
+          }
+        }
+      }
+
+      // Generate PDF with final template, custom inputs, and custom fonts
       const generateOptions = {};
 
       // Only add font option if custom fonts are loaded
@@ -409,7 +622,7 @@ app.post('/api/render', auth, async (req, res) => {
       }
 
       const u8 = await generate({
-        template,
+        template: finalTemplate,
         inputs: [pdfInputData],
         plugins,
         options: generateOptions
