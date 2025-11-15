@@ -242,11 +242,16 @@
             try {
               const fontCheck = await fetch(`/fonts/${fontPath}`, { method: 'HEAD' });
               if (fontCheck.ok) {
+                // First valid font becomes fallback
+                const isFallback = !fallbackSet;
                 fonts[fontName] = {
                   data: `/fonts/${fontPath}`,
-                  fallback: !fallbackSet && fontName === 'NotoSerifJP' // Only first valid font gets fallback
+                  fallback: isFallback
                 };
-                if (fontName === 'NotoSerifJP') fallbackSet = true;
+                if (isFallback) {
+                  fallbackSet = true;
+                  console.log(`[FONTS] Set ${fontName} as fallback font`);
+                }
               } else {
                 console.warn(`[FONTS] Font file not accessible: ${fontPath}`);
               }

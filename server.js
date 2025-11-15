@@ -214,11 +214,16 @@ function loadCustomFonts() {
       const fullPath = join(__dirname, 'public', 'fonts', fontPath);
       if (existsSync(fullPath)) {
         console.log(`[FONTS] Loading ${fontName} from ${fontPath}...`);
+        // First valid font becomes fallback
+        const isFallback = !fallbackSet;
         fonts[fontName] = {
           data: readFileSync(fullPath),
-          fallback: !fallbackSet && fontName === 'NotoSerifJP' // Only first valid font gets fallback
+          fallback: isFallback
         };
-        if (fontName === 'NotoSerifJP') fallbackSet = true;
+        if (isFallback) {
+          fallbackSet = true;
+          console.log(`[FONTS] Set ${fontName} as fallback font`);
+        }
       } else {
         console.warn(`[FONTS] Font file not found: ${fullPath}`);
       }
