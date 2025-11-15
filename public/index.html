@@ -729,13 +729,12 @@
             schemas.push([]);
             template.schemas = schemas;
 
-            // Update basePdf array if _secondBasePdf exists
-            if (secondBasePdf) {
-              template.basePdf = [template.basePdf, secondBasePdf];
-            }
+            // NOTE: We DON'T modify basePdf here because PDFme Designer doesn't support
+            // basePdf as array. The server will handle multi-page basePdf during render
+            // by using _secondBasePdf stored separately.
 
             designer.updateTemplate(template);
-            console.log('[MULTI-PAGE] Added Page 2 to template');
+            console.log('[MULTI-PAGE] Added Page 2 to template (basePdf handled by server)');
           }
 
           function removePage2() {
@@ -746,11 +745,7 @@
             if (schemas.length > 1) {
               template.schemas = [schemas[0]];
 
-              // Reset basePdf to single page
-              if (Array.isArray(template.basePdf)) {
-                template.basePdf = template.basePdf[0];
-              }
-
+              // basePdf stays as single value in Designer (server handles multi-page)
               designer.updateTemplate(template);
               console.log('[MULTI-PAGE] Removed Page 2 from template');
             }
