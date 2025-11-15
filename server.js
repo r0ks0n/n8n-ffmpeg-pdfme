@@ -112,6 +112,21 @@ const rateLimitMiddleware = (req, res, next) => {
 
 app.use(rateLimitMiddleware);
 app.use(sessionAuthMiddleware);
+
+// Set proper MIME types for font files before serving static files
+app.use((req, res, next) => {
+  if (req.path.endsWith('.otf')) {
+    res.type('font/otf');
+  } else if (req.path.endsWith('.ttf')) {
+    res.type('font/ttf');
+  } else if (req.path.endsWith('.woff')) {
+    res.type('font/woff');
+  } else if (req.path.endsWith('.woff2')) {
+    res.type('font/woff2');
+  }
+  next();
+});
+
 app.use(express.static('public'));
 
 // ---- TEMP request logger (za debug) ----
