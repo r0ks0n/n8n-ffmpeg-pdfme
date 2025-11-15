@@ -98,23 +98,8 @@
           <span style="font-size: 13px;">Enable different layout for continuation pages</span>
         </label>
 
-        <span id="multiPageSettings" style="display: none;">
-          <label style="display: inline-flex; align-items: center; gap: 4px; margin-right: 10px;">
-            <span style="font-size: 12px;">Page 1 Y:</span>
-            <input type="number" id="page1TextY" value="100" style="width: 60px; padding: 3px 6px;" />
-          </label>
-          <label style="display: inline-flex; align-items: center; gap: 4px; margin-right: 10px;">
-            <span style="font-size: 12px;">Page 1 Height:</span>
-            <input type="number" id="page1TextHeight" value="180" style="width: 60px; padding: 3px 6px;" />
-          </label>
-          <label style="display: inline-flex; align-items: center; gap: 4px; margin-right: 10px;">
-            <span style="font-size: 12px;">Page 2+ Y:</span>
-            <input type="number" id="page2TextY" value="20" style="width: 60px; padding: 3px 6px;" />
-          </label>
-          <label style="display: inline-flex; align-items: center; gap: 4px;">
-            <span style="font-size: 12px;">Page 2+ Height:</span>
-            <input type="number" id="page2TextHeight" value="260" style="width: 60px; padding: 3px 6px;" />
-          </label>
+        <span id="multiPageHint" style="display: none; font-size: 12px; color: #059669; background: #d1fae5; padding: 4px 8px; border-radius: 4px;">
+          ℹ️ Page 2 added to designer - position text frame with drag & drop
         </span>
       </div>
     </div>
@@ -672,16 +657,11 @@
 
           async function createTemplate() {
             const name = document.getElementById('tplName').value || 'Untitled Template';
-            const template = designer.getTemplate();
+            let template = designer.getTemplate();
             if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
 
-            // Save multi-page config if enabled
-            const multiPageConfig = getMultiPageConfig();
-            if (multiPageConfig) {
-              template._multiPageConfig = multiPageConfig;
-            } else {
-              delete template._multiPageConfig;
-            }
+            // Save multi-page enabled flag
+            template = saveMultiPageConfig();
 
             const res = await fetch(`${API.base}/api/templates`, {
               method: 'POST', headers: headers(), body: JSON.stringify({ name, template })
@@ -694,16 +674,11 @@
 
           async function updateTemplate(id) {
             const name = document.getElementById('tplName').value || 'Untitled Template';
-            const template = designer.getTemplate();
+            let template = designer.getTemplate();
             if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
 
-            // Save multi-page config if enabled
-            const multiPageConfig = getMultiPageConfig();
-            if (multiPageConfig) {
-              template._multiPageConfig = multiPageConfig;
-            } else {
-              delete template._multiPageConfig;
-            }
+            // Save multi-page enabled flag
+            template = saveMultiPageConfig();
 
             const res = await fetch(`${API.base}/api/templates/${id}`, {
               method: 'PUT', headers: headers(), body: JSON.stringify({ name, template })
@@ -722,45 +697,78 @@
           }
 
           // === Multi-Page Layout Helpers ===
-          function getMultiPageConfig() {
-            const enabled = document.getElementById('enableMultiPageLayout').checked;
-            if (!enabled) return null;
-
-            return {
-              enabled: true,
-              page1: {
-                y: parseFloat(document.getElementById('page1TextY').value) || 100,
-                height: parseFloat(document.getElementById('page1TextHeight').value) || 180
-              },
-              page2Plus: {
-                y: parseFloat(document.getElementById('page2TextY').value) || 20,
-                height: parseFloat(document.getElementById('page2TextHeight').value) || 260
-              }
-            };
+          function isMultiPageEnabled() {
+            return document.getElementById('enableMultiPageLayout').checked;
           }
 
-          function setMultiPageConfig(config) {
-            if (!config || !config.enabled) {
-              document.getElementById('enableMultiPageLayout').checked = false;
-              document.getElementById('multiPageSettings').style.display = 'none';
+          function toggleMultiPageLayout(enable) {
+            const checkbox = document.getElementById('enableMultiPageLayout');
+            const hint = document.getElementById('multiPageHint');
+
+            checkbox.checked = enable;
+            hint.style.display = enable ? '' : 'none';
+
+            if (enable) {
+              ensurePage2Exists();
+            } else {
+              removePage2();
+            }
+          }
+
+          function ensurePage2Exists() {
+            const template = designer.getTemplate();
+            const schemas = template.schemas || [[]];
+
+            // Check if Page 2 already exists
+            if (schemas.length >= 2) {
+              console.log('[MULTI-PAGE] Page 2 already exists');
               return;
             }
 
-            document.getElementById('enableMultiPageLayout').checked = true;
-            document.getElementById('multiPageSettings').style.display = '';
-            document.getElementById('page1TextY').value = config.page1?.y || 100;
-            document.getElementById('page1TextHeight').value = config.page1?.height || 180;
-            document.getElementById('page2TextY').value = config.page2Plus?.y || 20;
-            document.getElementById('page2TextHeight').value = config.page2Plus?.height || 260;
+            // Add Page 2 with empty schema (user will add fields via drag & drop)
+            schemas.push([]);
+            template.schemas = schemas;
+
+            // Update basePdf array if _secondBasePdf exists
+            if (secondBasePdf) {
+              template.basePdf = [template.basePdf, secondBasePdf];
+            }
+
+            designer.updateTemplate(template);
+            console.log('[MULTI-PAGE] Added Page 2 to template');
           }
 
-          function clearMultiPageConfig() {
-            document.getElementById('enableMultiPageLayout').checked = false;
-            document.getElementById('multiPageSettings').style.display = 'none';
-            document.getElementById('page1TextY').value = '100';
-            document.getElementById('page1TextHeight').value = '180';
-            document.getElementById('page2TextY').value = '20';
-            document.getElementById('page2TextHeight').value = '260';
+          function removePage2() {
+            const template = designer.getTemplate();
+            const schemas = template.schemas || [[]];
+
+            // Keep only first page
+            if (schemas.length > 1) {
+              template.schemas = [schemas[0]];
+
+              // Reset basePdf to single page
+              if (Array.isArray(template.basePdf)) {
+                template.basePdf = template.basePdf[0];
+              }
+
+              designer.updateTemplate(template);
+              console.log('[MULTI-PAGE] Removed Page 2 from template');
+            }
+          }
+
+          function saveMultiPageConfig() {
+            const template = designer.getTemplate();
+            if (isMultiPageEnabled()) {
+              template._multiPageEnabled = true;
+            } else {
+              delete template._multiPageEnabled;
+            }
+            return template;
+          }
+
+          function restoreMultiPageConfig(template) {
+            const enabled = template._multiPageEnabled === true;
+            toggleMultiPageLayout(enabled);
           }
 
           // === UI handlers ===
@@ -770,7 +778,7 @@
             secondBasePdf = null;
             setBaseStatus(1, false);
             setBaseStatus(2, false);
-            clearMultiPageConfig();
+            toggleMultiPageLayout(false);
             setCurrentId(null);
           };
 
@@ -838,7 +846,7 @@
               setBaseStatus(2, !!secondBasePdf);
 
               // Restore multi-page config
-              setMultiPageConfig(template._multiPageConfig);
+              restoreMultiPageConfig(template);
 
               setCurrentId(loadedId || id);
             } catch (e) {
@@ -872,7 +880,7 @@
               secondBasePdf = null;
               setBaseStatus(1, false);
               setBaseStatus(2, false);
-              clearMultiPageConfig();
+              toggleMultiPageLayout(false);
               await refreshList();
               alert('Deleted.');
             } catch (e) { showErr(e); alert(e.message || 'Delete failed'); }
@@ -1105,8 +1113,7 @@
 
           // Multi-Page Layout checkbox toggle
           document.getElementById('enableMultiPageLayout').onchange = function() {
-            const settingsPanel = document.getElementById('multiPageSettings');
-            settingsPanel.style.display = this.checked ? '' : 'none';
+            toggleMultiPageLayout(this.checked);
           };
 
           // Init
@@ -1114,7 +1121,7 @@
           setCurrentId(null);
           setBaseStatus(1, false);
           setBaseStatus(2, false);
-          clearMultiPageConfig();
+          toggleMultiPageLayout(false);
           document.getElementById('tplName').value = '';
           refreshList();
         } catch (e) {

@@ -516,44 +516,42 @@ app.post('/api/render', auth, async (req, res) => {
 
       console.log('[RENDER] Final PDFme inputs:', JSON.stringify(pdfInputData, null, 2));
 
-      // Check if multi-page text layout is enabled
+      // Check if multi-page text layout is enabled (user added Page 2 in designer)
       let finalTemplate = template;
-      if (template._multiPageConfig && template._multiPageConfig.enabled) {
-        console.log('[MULTI-PAGE] Config detected:', JSON.stringify(template._multiPageConfig, null, 2));
+      const schemas = template.schemas || [[]];
 
-        const config = template._multiPageConfig;
-        const firstPageSchema = template.schemas && template.schemas[0] ? template.schemas[0] : [];
+      if (template._multiPageEnabled && schemas.length >= 2) {
+        console.log('[MULTI-PAGE] Multi-page layout detected with', schemas.length, 'pages');
 
-        // Find multiVariableText fields in first page
-        const textFields = firstPageSchema.filter(field => field.type === 'multiVariableText');
+        const firstPageSchema = schemas[0] || [];
+        const secondPageSchema = schemas[1] || [];
 
-        if (textFields.length > 0) {
-          console.log(`[MULTI-PAGE] Found ${textFields.length} multiVariableText fields`);
+        // Find multiVariableText fields in both pages
+        const firstPageTextField = firstPageSchema.find(field => field.type === 'multiVariableText');
+        const secondPageTextField = secondPageSchema.find(field => field.type === 'multiVariableText');
 
-          // Process each text field for potential splitting
-          for (const textField of textFields) {
-            const fieldName = textField.name;
-            const fieldText = pdfInputData[fieldName];
+        if (firstPageTextField && secondPageTextField) {
+          const fieldName = firstPageTextField.name;
+          const fieldText = pdfInputData[fieldName];
 
-            if (!fieldText || typeof fieldText !== 'string') continue;
-
+          if (fieldText && typeof fieldText === 'string') {
             console.log(`[MULTI-PAGE] Processing field "${fieldName}" with ${fieldText.length} characters`);
 
-            // Calculate text capacity for first page and continuation pages
+            // Calculate text capacity based on actual field dimensions from designer
             const firstPageCapacity = calculateTextCapacity(
-              textField.width || 170,
-              config.page1.height || 180,
-              textField.fontSize || 11,
-              textField.lineHeight || 1.5,
-              textField.characterSpacing || 0
+              firstPageTextField.width || 170,
+              firstPageTextField.height || 180,
+              firstPageTextField.fontSize || 11,
+              firstPageTextField.lineHeight || 1.5,
+              firstPageTextField.characterSpacing || 0
             );
 
             const continuationCapacity = calculateTextCapacity(
-              textField.width || 170,
-              config.page2Plus.height || 260,
-              textField.fontSize || 11,
-              textField.lineHeight || 1.5,
-              textField.characterSpacing || 0
+              secondPageTextField.width || 170,
+              secondPageTextField.height || 260,
+              secondPageTextField.fontSize || 11,
+              secondPageTextField.lineHeight || 1.5,
+              secondPageTextField.characterSpacing || 0
             );
 
             // Split text if it exceeds first page capacity
@@ -564,52 +562,54 @@ app.post('/api/render', auth, async (req, res) => {
               // Create new schemas array with dynamic pages
               const newSchemas = [];
 
-              // First page (keep original schema, but update text position if needed)
-              const firstPageSchemas = firstPageSchema.map(field => {
-                if (field.name === fieldName) {
-                  return {
-                    ...field,
-                    position: { x: field.position.x, y: config.page1.y },
-                    height: config.page1.height
-                  };
-                }
-                return field;
-              });
-              newSchemas.push(firstPageSchemas);
+              // First page (keep all fields from original)
+              newSchemas.push(firstPageSchema);
 
               // Update input data for first page
               pdfInputData[fieldName] = textChunks[0];
 
-              // Create continuation pages
+              // Create continuation pages using Page 2 layout
               for (let i = 1; i < textChunks.length; i++) {
-                const continuationField = {
-                  ...textField,
-                  name: `${fieldName}_page${i + 1}`,
-                  position: { x: textField.position.x, y: config.page2Plus.y },
-                  height: config.page2Plus.height
-                };
+                // Clone Page 2 schema fields for each continuation page
+                const continuationSchemas = secondPageSchema.map(field => {
+                  if (field.type === 'multiVariableText') {
+                    return {
+                      ...field,
+                      name: `${fieldName}_page${i + 1}`
+                    };
+                  }
+                  return field;
+                });
 
-                // Only include the text field on continuation pages
-                newSchemas.push([continuationField]);
+                newSchemas.push(continuationSchemas);
 
                 // Add continuation text to input data
                 pdfInputData[`${fieldName}_page${i + 1}`] = textChunks[i];
+              }
+
+              // Build basePdf array if _secondBasePdf exists
+              let basePdfArray = template.basePdf;
+              if (template._secondBasePdf) {
+                basePdfArray = [template.basePdf];
+                for (let i = 1; i < newSchemas.length; i++) {
+                  basePdfArray.push(template._secondBasePdf);
+                }
               }
 
               // Update template with new schemas
               finalTemplate = {
                 ...template,
                 schemas: newSchemas,
-                // Use _secondBasePdf for continuation pages if available
-                basePdf: template.basePdf
+                basePdf: basePdfArray
               };
 
               console.log(`[MULTI-PAGE] Generated ${newSchemas.length} page schemas`);
-              break; // Only process first multiVariableText field for now
             } else {
               console.log(`[MULTI-PAGE] Text fits on single page, no splitting needed`);
             }
           }
+        } else {
+          console.log('[MULTI-PAGE] No multiVariableText fields found on both pages');
         }
       }
 
