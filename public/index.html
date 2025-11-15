@@ -762,11 +762,22 @@
               recreateDesigner(page1Template);
             } else {
               // Show Page 1 and Page 2 with correct base PDFs
+              console.log('[DEBUG] currentBasePdf:', typeof currentBasePdf, currentBasePdf?.substring(0, 50));
+              console.log('[DEBUG] secondBasePdf:', typeof secondBasePdf, secondBasePdf?.substring(0, 50));
+              console.log('[DEBUG] secondBasePdf exists:', !!secondBasePdf);
+              console.log('[DEBUG] currentBasePdf exists:', !!currentBasePdf);
+
               const page2Template = {
                 ...currentTemplate,
                 basePdf: [currentBasePdf, secondBasePdf],
                 schemas: [currentSchemas[0] || [], savedPage2Schema]
               };
+
+              console.log('[DEBUG] page2Template.basePdf is array:', Array.isArray(page2Template.basePdf));
+              console.log('[DEBUG] page2Template.basePdf length:', page2Template.basePdf.length);
+              console.log('[DEBUG] page2Template.basePdf[0] type:', typeof page2Template.basePdf[0]);
+              console.log('[DEBUG] page2Template.basePdf[1] type:', typeof page2Template.basePdf[1]);
+
               recreateDesigner(page2Template);
             }
 
