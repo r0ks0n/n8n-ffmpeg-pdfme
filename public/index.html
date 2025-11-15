@@ -624,7 +624,7 @@
             designerOptions.font = customFonts;
           }
 
-          const designer = new Designer({
+          let designer = new Designer({
             domContainer: container,
             template: initialTemplate,
             plugins, // VSE sheme po dokumentaciji
@@ -729,12 +729,19 @@
             schemas.push([]);
             template.schemas = schemas;
 
-            // NOTE: We DON'T modify basePdf here because PDFme Designer doesn't support
-            // basePdf as array. The server will handle multi-page basePdf during render
-            // by using _secondBasePdf stored separately.
+            // Set basePdf as array if secondBasePdf exists
+            // PDFme Designer DOES support basePdf arrays, but we need to recreate the designer
+            if (secondBasePdf) {
+              const currentBasePdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
+              template.basePdf = [currentBasePdf, secondBasePdf];
 
-            designer.updateTemplate(template);
-            console.log('[MULTI-PAGE] Added Page 2 to template (basePdf handled by server)');
+              // Recreate designer with new template
+              recreateDesigner(template);
+              console.log('[MULTI-PAGE] Added Page 2 with custom base PDF');
+            } else {
+              designer.updateTemplate(template);
+              console.log('[MULTI-PAGE] Added Page 2 (no custom base PDF set)');
+            }
           }
 
           function removePage2() {
@@ -745,10 +752,31 @@
             if (schemas.length > 1) {
               template.schemas = [schemas[0]];
 
-              // basePdf stays as single value in Designer (server handles multi-page)
-              designer.updateTemplate(template);
+              // Reset basePdf to single page
+              if (Array.isArray(template.basePdf)) {
+                template.basePdf = template.basePdf[0];
+              }
+
+              // Recreate designer with updated template
+              recreateDesigner(template);
               console.log('[MULTI-PAGE] Removed Page 2 from template');
             }
+          }
+
+          // Recreate designer instance (needed for basePdf array changes)
+          function recreateDesigner(newTemplate) {
+            // Destroy current designer by clearing container
+            container.innerHTML = '';
+
+            // Create new designer instance with updated template
+            designer = new Designer({
+              domContainer: container,
+              template: newTemplate,
+              plugins,
+              options: designerOptions
+            });
+
+            console.log('[MULTI-PAGE] Designer recreated with basePdf:', Array.isArray(newTemplate.basePdf) ? `array (${newTemplate.basePdf.length} pages)` : 'single page');
           }
 
           function saveMultiPageConfig() {
@@ -763,7 +791,22 @@
 
           function restoreMultiPageConfig(template) {
             const enabled = template._multiPageEnabled === true;
-            toggleMultiPageLayout(enabled);
+            const schemas = template.schemas || [[]];
+            const hasPage2 = schemas.length >= 2;
+
+            // Update checkbox and hint
+            const checkbox = document.getElementById('enableMultiPageLayout');
+            const hint = document.getElementById('multiPageHint');
+            checkbox.checked = enabled;
+            hint.style.display = (enabled && hasPage2) ? '' : 'none';
+
+            // If enabled and has Page 2, recreate designer with basePdf array
+            if (enabled && hasPage2 && secondBasePdf) {
+              const currentBasePdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
+              template.basePdf = [currentBasePdf, secondBasePdf];
+              recreateDesigner(template);
+              console.log('[MULTI-PAGE] Restored multi-page layout with custom base PDF');
+            }
           }
 
           // === UI handlers ===
