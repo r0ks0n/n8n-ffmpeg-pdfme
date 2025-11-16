@@ -628,6 +628,30 @@ app.post('/api/render', auth, async (req, res) => {
         }
       }
 
+      // Detailed basePdf inspection before generating
+      console.log('[BASEPDF DEBUG] Inspecting basePdf before generation:');
+      console.log('[BASEPDF DEBUG] basePdf type:', typeof finalTemplate.basePdf);
+      console.log('[BASEPDF DEBUG] basePdf is array:', Array.isArray(finalTemplate.basePdf));
+
+      if (Array.isArray(finalTemplate.basePdf)) {
+        console.log('[BASEPDF DEBUG] basePdf array length:', finalTemplate.basePdf.length);
+        finalTemplate.basePdf.forEach((pdf, idx) => {
+          console.log(`[BASEPDF DEBUG] Element ${idx} type:`, typeof pdf);
+          console.log(`[BASEPDF DEBUG] Element ${idx} is string:`, typeof pdf === 'string');
+          if (typeof pdf === 'string') {
+            console.log(`[BASEPDF DEBUG] Element ${idx} length:`, pdf.length);
+            console.log(`[BASEPDF DEBUG] Element ${idx} starts with:`, pdf.substring(0, 50));
+            console.log(`[BASEPDF DEBUG] Element ${idx} is data URL:`, pdf.startsWith('data:'));
+          } else {
+            console.log(`[BASEPDF DEBUG] Element ${idx} value:`, pdf);
+          }
+        });
+      } else if (typeof finalTemplate.basePdf === 'string') {
+        console.log('[BASEPDF DEBUG] basePdf string length:', finalTemplate.basePdf.length);
+        console.log('[BASEPDF DEBUG] basePdf starts with:', finalTemplate.basePdf.substring(0, 50));
+        console.log('[BASEPDF DEBUG] basePdf is data URL:', finalTemplate.basePdf.startsWith('data:'));
+      }
+
       // Generate PDF with final template, custom inputs, and custom fonts
       const generateOptions = {};
 
