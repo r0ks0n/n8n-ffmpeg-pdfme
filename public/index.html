@@ -657,6 +657,12 @@
                 const opt = [...select.options].find(o => o.value === currentId);
                 if (opt) select.value = currentId;
               }
+              // Auto-load first template if no template is currently loaded
+              else if (list.length > 0 && !currentId) {
+                const firstId = list[0].id;
+                select.value = firstId;
+                await loadTemplate(firstId);
+              }
             } catch (e) { showErr(e); }
           }
 
@@ -751,22 +757,16 @@
 
             // Save schema from current page before switching
             if (currentEditingPage === 1 && pageNumber === 2) {
-              // Switching from Page 1 to Page 2: save Page 1 schema
               savedPage1Schema = currentSchemas[0] || [];
-              console.log('[PAGE-SWITCH] Saved Page 1 schema with', savedPage1Schema.length, 'fields');
             } else if (currentEditingPage === 2 && pageNumber === 1) {
-              // Switching from Page 2 to Page 1: save Page 2 schema
               savedPage2Schema = currentSchemas[0] || [];
-              console.log('[PAGE-SWITCH] Saved Page 2 schema with', savedPage2Schema.length, 'fields');
             }
 
             currentEditingPage = pageNumber;
 
             if (pageNumber === 1) {
               // Show only Page 1 with its PDF
-              console.log('[PAGE-SWITCH] firstBasePdf exists:', !!firstBasePdf, typeof firstBasePdf);
               if (!firstBasePdf) {
-                console.error('[PAGE-SWITCH] firstBasePdf is null/undefined!');
                 alert('Page 1 base PDF not found. Please reload the template.');
                 return;
               }
@@ -775,14 +775,10 @@
                 basePdf: firstBasePdf,
                 schemas: [savedPage1Schema || []]
               };
-              console.log('[PAGE-SWITCH] Loading Page 1 with', savedPage1Schema.length, 'fields');
-              console.log('[PAGE-SWITCH] Page 1 basePdf length:', firstBasePdf?.length || 0);
               recreateDesigner(page1Template);
             } else {
               // Show Page 2+ alone with its PDF
-              console.log('[PAGE-SWITCH] secondBasePdf exists:', !!secondBasePdf, typeof secondBasePdf);
               if (!secondBasePdf) {
-                console.error('[PAGE-SWITCH] secondBasePdf is null/undefined!');
                 alert('Page 2+ base PDF not found.');
                 return;
               }
@@ -791,13 +787,10 @@
                 basePdf: secondBasePdf,
                 schemas: [savedPage2Schema || []]
               };
-              console.log('[PAGE-SWITCH] Loading Page 2+ with', savedPage2Schema.length, 'fields');
-              console.log('[PAGE-SWITCH] Page 2+ basePdf length:', secondBasePdf?.length || 0);
               recreateDesigner(page2Template);
             }
 
             updatePageSwitchUI();
-            console.log(`[PAGE-SWITCH] Switched to editing Page ${pageNumber}`);
           }
 
           // Update designer template (use updateTemplate instead of recreating)
@@ -811,16 +804,8 @@
               ...(newTemplate.columns && { columns: newTemplate.columns })
             };
 
-            console.log('[DESIGNER] Updating template with basePdf type:', typeof validTemplate.basePdf);
-            console.log('[DESIGNER] basePdf is array:', Array.isArray(validTemplate.basePdf));
-            console.log('[DESIGNER] basePdf length:', validTemplate.basePdf?.length || 'N/A');
-            console.log('[DESIGNER] schemas length:', validTemplate.schemas.length);
-            console.log('[DESIGNER] schemas[0] length:', validTemplate.schemas[0]?.length || 0);
-
             try {
-              // Use updateTemplate() method instead of recreating the Designer
               designer.updateTemplate(validTemplate);
-              console.log('[DESIGNER] Successfully updated template');
             } catch (err) {
               console.error('[DESIGNER] Failed to update template:', err);
               alert('Failed to switch pages: ' + err.message);
@@ -949,8 +934,6 @@
                 savedPage1Schema = schemas.length >= 1 ? schemas[0] : [];
                 savedPage2Schema = schemas.length >= 2 ? schemas[1] : [];
 
-                console.log('[LOAD] Multi-page mode: Page 1 has', savedPage1Schema.length, 'fields, Page 2 has', savedPage2Schema.length, 'fields');
-
                 // Show only Page 1 initially
                 const page1Template = {
                   ...template,
@@ -962,7 +945,6 @@
                 // Single page mode
                 savedPage1Schema = [];
                 savedPage2Schema = [];
-                console.log('[LOAD] Single-page mode');
                 designer.updateTemplate(template);
               }
 
