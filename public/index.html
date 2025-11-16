@@ -845,10 +845,16 @@
                 page2Schema = currentSchemas[0] || [];
               }
 
-              // Return complete template with both pages (basePdf array for Generator)
+              // Return complete template with both pages
+              // CRITICAL: basePdf must be object with string keys '0', '1' for PDFme v5 multi-page
+              const basePdfObject = {
+                '0': firstBasePdf,
+                '1': secondBasePdf
+              };
+
               return {
                 ...template,
-                basePdf: [firstBasePdf, secondBasePdf],
+                basePdf: basePdfObject,
                 schemas: [page1Schema, page2Schema]
               };
             }
@@ -930,9 +936,24 @@
               const { name, template, id: loadedId } = await res.json();
               document.getElementById('tplName').value = name;
 
-              // Extract base PDFs
+              // Extract base PDFs - handle both array and object formats
               secondBasePdf = typeof template._secondBasePdf === 'string' ? template._secondBasePdf : null;
-              firstBasePdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
+
+              // basePdf can be: string, array, or object with '0', '1' keys
+              if (typeof template.basePdf === 'string') {
+                firstBasePdf = template.basePdf;
+              } else if (Array.isArray(template.basePdf)) {
+                firstBasePdf = template.basePdf[0];
+              } else if (typeof template.basePdf === 'object' && template.basePdf !== null) {
+                // Object format: {'0': pdf1, '1': pdf2}
+                firstBasePdf = template.basePdf['0'] || template.basePdf[0] || Object.values(template.basePdf)[0];
+                // If no _secondBasePdf stored separately, try to extract from object
+                if (!secondBasePdf && (template.basePdf['1'] || template.basePdf[1])) {
+                  secondBasePdf = template.basePdf['1'] || template.basePdf[1];
+                }
+              } else {
+                firstBasePdf = template.basePdf;
+              }
 
               setBaseStatus(1, !!firstBasePdf);
               setBaseStatus(2, !!secondBasePdf);

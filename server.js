@@ -509,6 +509,10 @@ app.post('/api/render', auth, async (req, res) => {
               // Direct mapping: use value from context if it exists
               pdfInputData[fieldName] = ctx[fieldName];
               console.log(`[RENDER] Field "${fieldName}": direct mapping -> "${ctx[fieldName]}"`);
+            } else if (content && typeof content === 'string') {
+              // If schema has content but no matching variable, use it directly
+              pdfInputData[fieldName] = content;
+              console.log(`[RENDER] Field "${fieldName}": using schema content directly`);
             }
           });
         });
@@ -516,9 +520,26 @@ app.post('/api/render', auth, async (req, res) => {
 
       console.log('[RENDER] Final PDFme inputs:', JSON.stringify(pdfInputData, null, 2));
 
+      // CRITICAL FIX: Clean template schemas before processing
+      // Remove 'content' field from multiVariableText schemas to prevent JSON validation errors
+      // PDFme expects content to be provided via inputs array, not in schema
+      const cleanedTemplate = JSON.parse(JSON.stringify(template)); // Deep clone
+      if (cleanedTemplate.schemas && Array.isArray(cleanedTemplate.schemas)) {
+        cleanedTemplate.schemas.forEach(pageSchemas => {
+          if (!Array.isArray(pageSchemas)) return;
+          pageSchemas.forEach(schema => {
+            if (schema.type === 'multiVariableText' && schema.content) {
+              // Store original content for reference but remove from schema
+              schema._originalContent = schema.content;
+              delete schema.content;
+            }
+          });
+        });
+      }
+
       // Check if multi-page text layout is enabled (user added Page 2 in designer)
-      let finalTemplate = template;
-      const schemas = template.schemas || [[]];
+      let finalTemplate = cleanedTemplate;
+      const schemas = cleanedTemplate.schemas || [[]];
 
       // Debug basePdf
       console.log('[RENDER] template.basePdf type:', typeof template.basePdf);
@@ -594,18 +615,19 @@ app.post('/api/render', auth, async (req, res) => {
               }
 
               // Build basePdf object if _secondBasePdf exists
-              // PDFme requires basePdf as object with keys '/0', '/1', etc for multi-page
+              // PDFme requires basePdf as object with keys '0', '1', etc for multi-page (NOT '/0', '/1')
               let basePdfForGenerator = template.basePdf;
               if (template._secondBasePdf) {
                 // Extract first PDF if basePdf is already an array
                 const firstPdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
 
-                // Build object with '/0', '/1', etc keys for each page
+                // Build object with '0', '1', etc keys for each page (PDFme v5 format)
                 basePdfForGenerator = {};
-                basePdfForGenerator['/0'] = firstPdf;
-                for (let i = 1; i < newSchemas.length; i++) {
-                  basePdfForGenerator[`/${i}`] = template._secondBasePdf;
+                for (let i = 0; i < newSchemas.length; i++) {
+                  basePdfForGenerator[String(i)] = i === 0 ? firstPdf : template._secondBasePdf;
                 }
+
+                console.log(`[MULTI-PAGE] Built basePdf object with ${Object.keys(basePdfForGenerator).length} pages`);
               }
 
               // Update template with new schemas
@@ -638,36 +660,31 @@ app.post('/api/render', auth, async (req, res) => {
       console.log('[BASEPDF DEBUG] basePdf type:', typeof finalTemplate.basePdf);
       console.log('[BASEPDF DEBUG] basePdf is array:', Array.isArray(finalTemplate.basePdf));
 
+      // CRITICAL FIX: Convert array to object format if needed
       if (Array.isArray(finalTemplate.basePdf)) {
-        console.log('[BASEPDF DEBUG] basePdf array length:', finalTemplate.basePdf.length);
-        finalTemplate.basePdf.forEach((pdf, idx) => {
-          console.log(`[BASEPDF DEBUG] Element ${idx} type:`, typeof pdf);
-          console.log(`[BASEPDF DEBUG] Element ${idx} is string:`, typeof pdf === 'string');
-          if (typeof pdf === 'string') {
-            console.log(`[BASEPDF DEBUG] Element ${idx} length:`, pdf.length);
-            console.log(`[BASEPDF DEBUG] Element ${idx} starts with:`, pdf.substring(0, 50));
-            console.log(`[BASEPDF DEBUG] Element ${idx} is data URL:`, pdf.startsWith('data:'));
-          } else {
-            console.log(`[BASEPDF DEBUG] Element ${idx} value:`, pdf);
-          }
+        console.log('[BASEPDF DEBUG] ⚠️  basePdf is array - converting to object format for PDFme v5');
+        const basePdfArray = finalTemplate.basePdf;
+        const basePdfObject = {};
+        basePdfArray.forEach((pdf, idx) => {
+          basePdfObject[String(idx)] = pdf;
         });
-      } else if (typeof finalTemplate.basePdf === 'object' && finalTemplate.basePdf !== null) {
+        finalTemplate.basePdf = basePdfObject;
+        console.log('[BASEPDF DEBUG] ✅ Converted to object with keys:', Object.keys(basePdfObject));
+      }
+
+      if (typeof finalTemplate.basePdf === 'object' && finalTemplate.basePdf !== null && !Array.isArray(finalTemplate.basePdf)) {
         console.log('[BASEPDF DEBUG] basePdf is object with keys:', Object.keys(finalTemplate.basePdf));
         Object.entries(finalTemplate.basePdf).forEach(([key, pdf]) => {
           console.log(`[BASEPDF DEBUG] Key "${key}" type:`, typeof pdf);
-          console.log(`[BASEPDF DEBUG] Key "${key}" is string:`, typeof pdf === 'string');
           if (typeof pdf === 'string') {
             console.log(`[BASEPDF DEBUG] Key "${key}" length:`, pdf.length);
             console.log(`[BASEPDF DEBUG] Key "${key}" starts with:`, pdf.substring(0, 50));
             console.log(`[BASEPDF DEBUG] Key "${key}" is data URL:`, pdf.startsWith('data:'));
-          } else {
-            console.log(`[BASEPDF DEBUG] Key "${key}" value:`, pdf);
           }
         });
       } else if (typeof finalTemplate.basePdf === 'string') {
-        console.log('[BASEPDF DEBUG] basePdf string length:', finalTemplate.basePdf.length);
+        console.log('[BASEPDF DEBUG] basePdf is single string (length:', finalTemplate.basePdf.length, ')');
         console.log('[BASEPDF DEBUG] basePdf starts with:', finalTemplate.basePdf.substring(0, 50));
-        console.log('[BASEPDF DEBUG] basePdf is data URL:', finalTemplate.basePdf.startsWith('data:'));
       }
 
       // Generate PDF with final template, custom inputs, and custom fonts

@@ -1,0 +1,10 @@
+{
+  "description": "Test multi-page rendering with text splitting",
+  "templateId": "YOUR_TEMPLATE_ID_HERE",
+  "inputs": [
+    {
+      "content": "V numerologiji ima vsaka številka svojo unikatno vibracijo in energijo, ki vpliva na vašo življenjsko pot in razvojne smernice. Ko ljudje začnejo razumeti te vibracije, lahko zelo učinkovito usmerjajo svoje življenje in razvijejo globlje razumevanje okolja in samega sebe.\n\nČe ste na primer na življenjski poti številka 1, ste rojen vodja. Imate zmožnost motriti situacije, razumeti, kaj je potrebno storiti, in nato ukrepati. Ta vodilna sposobnost pa lahko včasih vodi do tega, da se počutite nekoliko osamljeni ali nerazumljeni. Čeprav je to lahko frustrirajoče, je pomembno, da se osredotočate na vaše talente in si prizadevate uskladiti vašo vizijo s potrebami drugih, da bi dosegli harmonijo in osebni uspeh.\n\nKdor je na poti številka 2, pa je naravni mirotvorec, ki išče ravnotežje in harmonijo v vseh odnosih. Imate zelo empatično in intuitivno naravo, ki vam omogoča, da intuitivno razumete občutke in misli drugih ljudi. Ta sposobnost lahko na trenutke povzroči občutek, kot da nosite bremena drugih, zato je pomembno, da se naučite učinkovito ravnati s svojimi čustvi in postavitev zdravih meja.\n\nPomembno je razumeti, da je vaša življenjska pot unikatna in edinstvena. Vsako število ima svoje prednosti in izzive, vendar lahko s pravilnim razumevanjem in ravnovesjem z dosežete izjemni osebni in profesionalni uspeh. Numerologija lahko ponudi dragocen vpogled v vašo številko življenjske poti in pomaga določiti vaše potenciale, potrebe, talenti in prepreke, s katerimi se lahko srečujete."
+    }
+  ],
+  "fileName": "test_multipage_output"
+}
