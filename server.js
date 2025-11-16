@@ -593,14 +593,18 @@ app.post('/api/render', auth, async (req, res) => {
                 pdfInputData[`${fieldName}_page${i + 1}`] = textChunks[i];
               }
 
-              // Build basePdf array if _secondBasePdf exists
-              let basePdfArray = template.basePdf;
+              // Build basePdf object if _secondBasePdf exists
+              // PDFme requires basePdf as object with keys '/0', '/1', etc for multi-page
+              let basePdfForGenerator = template.basePdf;
               if (template._secondBasePdf) {
                 // Extract first PDF if basePdf is already an array
                 const firstPdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
-                basePdfArray = [firstPdf];
+
+                // Build object with '/0', '/1', etc keys for each page
+                basePdfForGenerator = {};
+                basePdfForGenerator['/0'] = firstPdf;
                 for (let i = 1; i < newSchemas.length; i++) {
-                  basePdfArray.push(template._secondBasePdf);
+                  basePdfForGenerator[`/${i}`] = template._secondBasePdf;
                 }
               }
 
@@ -608,7 +612,7 @@ app.post('/api/render', auth, async (req, res) => {
               finalTemplate = {
                 ...template,
                 schemas: newSchemas,
-                basePdf: basePdfArray
+                basePdf: basePdfForGenerator
               };
 
               console.log(`[MULTI-PAGE] Generated ${newSchemas.length} page schemas`);
@@ -630,6 +634,7 @@ app.post('/api/render', auth, async (req, res) => {
 
       // Detailed basePdf inspection before generating
       console.log('[BASEPDF DEBUG] Inspecting basePdf before generation:');
+      console.log('[BASEPDF DEBUG] schemas length:', finalTemplate.schemas?.length);
       console.log('[BASEPDF DEBUG] basePdf type:', typeof finalTemplate.basePdf);
       console.log('[BASEPDF DEBUG] basePdf is array:', Array.isArray(finalTemplate.basePdf));
 
@@ -644,6 +649,19 @@ app.post('/api/render', auth, async (req, res) => {
             console.log(`[BASEPDF DEBUG] Element ${idx} is data URL:`, pdf.startsWith('data:'));
           } else {
             console.log(`[BASEPDF DEBUG] Element ${idx} value:`, pdf);
+          }
+        });
+      } else if (typeof finalTemplate.basePdf === 'object' && finalTemplate.basePdf !== null) {
+        console.log('[BASEPDF DEBUG] basePdf is object with keys:', Object.keys(finalTemplate.basePdf));
+        Object.entries(finalTemplate.basePdf).forEach(([key, pdf]) => {
+          console.log(`[BASEPDF DEBUG] Key "${key}" type:`, typeof pdf);
+          console.log(`[BASEPDF DEBUG] Key "${key}" is string:`, typeof pdf === 'string');
+          if (typeof pdf === 'string') {
+            console.log(`[BASEPDF DEBUG] Key "${key}" length:`, pdf.length);
+            console.log(`[BASEPDF DEBUG] Key "${key}" starts with:`, pdf.substring(0, 50));
+            console.log(`[BASEPDF DEBUG] Key "${key}" is data URL:`, pdf.startsWith('data:'));
+          } else {
+            console.log(`[BASEPDF DEBUG] Key "${key}" value:`, pdf);
           }
         });
       } else if (typeof finalTemplate.basePdf === 'string') {
