@@ -666,6 +666,20 @@ app.post('/api/render', auth, async (req, res) => {
         }
       }
 
+      // CRITICAL: Clean content field AGAIN after multi-page processing
+      // Multi-page processing may have created new schemas that still have content field
+      if (finalTemplate.schemas && Array.isArray(finalTemplate.schemas)) {
+        finalTemplate.schemas.forEach(pageSchemas => {
+          if (!Array.isArray(pageSchemas)) return;
+          pageSchemas.forEach(schema => {
+            if (schema.type === 'multiVariableText' && schema.content) {
+              console.log(`[RENDER] Removing content field from schema "${schema.name}" before generation`);
+              delete schema.content;
+            }
+          });
+        });
+      }
+
       // Detailed basePdf inspection before generating
       console.log('[BASEPDF DEBUG] Inspecting basePdf before generation:');
       console.log('[BASEPDF DEBUG] schemas length:', finalTemplate.schemas?.length);
