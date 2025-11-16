@@ -641,12 +641,24 @@ app.post('/api/render', auth, async (req, res) => {
             } else {
               console.log(`[MULTI-PAGE] Text fits on single page, no splitting needed`);
               // Use only first page schema and first basePdf
-              const firstPdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
+              let firstPdf;
+              if (typeof template.basePdf === 'string') {
+                firstPdf = template.basePdf;
+              } else if (Array.isArray(template.basePdf)) {
+                firstPdf = template.basePdf[0];
+              } else if (typeof template.basePdf === 'object' && template.basePdf !== null) {
+                // Extract first PDF from object format {'0': pdf, '1': pdf}
+                firstPdf = template.basePdf['0'] || template.basePdf[0] || Object.values(template.basePdf)[0];
+              } else {
+                firstPdf = template.basePdf;
+              }
+
               finalTemplate = {
                 ...template,
-                basePdf: firstPdf, // Single PDF string, not array
+                basePdf: firstPdf, // CRITICAL: Single PDF string for single page
                 schemas: [firstPageSchema] // Only first page schema
               };
+              console.log(`[MULTI-PAGE] Single page mode - basePdf is string:`, typeof firstPdf === 'string');
             }
           }
         } else {
@@ -660,16 +672,35 @@ app.post('/api/render', auth, async (req, res) => {
       console.log('[BASEPDF DEBUG] basePdf type:', typeof finalTemplate.basePdf);
       console.log('[BASEPDF DEBUG] basePdf is array:', Array.isArray(finalTemplate.basePdf));
 
-      // CRITICAL FIX: Convert array to object format if needed
-      if (Array.isArray(finalTemplate.basePdf)) {
-        console.log('[BASEPDF DEBUG] ⚠️  basePdf is array - converting to object format for PDFme v5');
-        const basePdfArray = finalTemplate.basePdf;
-        const basePdfObject = {};
-        basePdfArray.forEach((pdf, idx) => {
-          basePdfObject[String(idx)] = pdf;
-        });
-        finalTemplate.basePdf = basePdfObject;
-        console.log('[BASEPDF DEBUG] ✅ Converted to object with keys:', Object.keys(basePdfObject));
+      // CRITICAL FIX: Format basePdf correctly based on page count
+      const pageCount = finalTemplate.schemas?.length || 1;
+
+      if (pageCount === 1) {
+        // Single page: MUST be string
+        if (Array.isArray(finalTemplate.basePdf)) {
+          console.log('[BASEPDF DEBUG] ⚠️  Single page but basePdf is array - extracting first element');
+          finalTemplate.basePdf = finalTemplate.basePdf[0];
+        } else if (typeof finalTemplate.basePdf === 'object' && finalTemplate.basePdf !== null && !Array.isArray(finalTemplate.basePdf)) {
+          console.log('[BASEPDF DEBUG] ⚠️  Single page but basePdf is object - extracting first value');
+          finalTemplate.basePdf = finalTemplate.basePdf['0'] || finalTemplate.basePdf[0] || Object.values(finalTemplate.basePdf)[0];
+        }
+        console.log('[BASEPDF DEBUG] ✅ Single page mode - basePdf type:', typeof finalTemplate.basePdf);
+      } else {
+        // Multi-page: MUST be object with string keys
+        if (Array.isArray(finalTemplate.basePdf)) {
+          console.log('[BASEPDF DEBUG] ⚠️  Multi-page but basePdf is array - converting to object format');
+          const basePdfArray = finalTemplate.basePdf;
+          const basePdfObject = {};
+          basePdfArray.forEach((pdf, idx) => {
+            basePdfObject[String(idx)] = pdf;
+          });
+          finalTemplate.basePdf = basePdfObject;
+          console.log('[BASEPDF DEBUG] ✅ Converted to object with keys:', Object.keys(basePdfObject));
+        } else if (typeof finalTemplate.basePdf === 'string') {
+          console.log('[BASEPDF DEBUG] ⚠️  Multi-page but basePdf is string - wrapping in object');
+          finalTemplate.basePdf = { '0': finalTemplate.basePdf };
+        }
+        console.log('[BASEPDF DEBUG] ✅ Multi-page mode - basePdf keys:', Object.keys(finalTemplate.basePdf));
       }
 
       if (typeof finalTemplate.basePdf === 'object' && finalTemplate.basePdf !== null && !Array.isArray(finalTemplate.basePdf)) {
