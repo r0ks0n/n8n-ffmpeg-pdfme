@@ -633,6 +633,9 @@
             options: designerOptions
           });
 
+          // Initialize firstBasePdf from initial template
+          firstBasePdf = initialTemplate.basePdf;
+
           // === API: lista in CRUD ===
           async function refreshList() {
             try {
@@ -761,7 +764,9 @@
 
             if (pageNumber === 1) {
               // Show only Page 1 with its PDF
+              console.log('[PAGE-SWITCH] firstBasePdf exists:', !!firstBasePdf, typeof firstBasePdf);
               if (!firstBasePdf) {
+                console.error('[PAGE-SWITCH] firstBasePdf is null/undefined!');
                 alert('Page 1 base PDF not found. Please reload the template.');
                 return;
               }
@@ -771,10 +776,13 @@
                 schemas: [savedPage1Schema || []]
               };
               console.log('[PAGE-SWITCH] Loading Page 1 with', savedPage1Schema.length, 'fields');
+              console.log('[PAGE-SWITCH] Page 1 basePdf length:', firstBasePdf?.length || 0);
               recreateDesigner(page1Template);
             } else {
               // Show Page 2+ alone with its PDF
+              console.log('[PAGE-SWITCH] secondBasePdf exists:', !!secondBasePdf, typeof secondBasePdf);
               if (!secondBasePdf) {
+                console.error('[PAGE-SWITCH] secondBasePdf is null/undefined!');
                 alert('Page 2+ base PDF not found.');
                 return;
               }
@@ -784,6 +792,7 @@
                 schemas: [savedPage2Schema || []]
               };
               console.log('[PAGE-SWITCH] Loading Page 2+ with', savedPage2Schema.length, 'fields');
+              console.log('[PAGE-SWITCH] Page 2+ basePdf length:', secondBasePdf?.length || 0);
               recreateDesigner(page2Template);
             }
 
