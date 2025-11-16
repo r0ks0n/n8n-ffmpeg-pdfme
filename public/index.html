@@ -669,7 +669,13 @@
           async function createTemplate() {
             const name = document.getElementById('tplName').value || 'Untitled Template';
             let template = getCompleteTemplate();
-            if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
+            if (secondBasePdf) {
+              template._secondBasePdf = secondBasePdf;
+              template._multiPageEnabled = true;
+            } else {
+              delete template._secondBasePdf;
+              delete template._multiPageEnabled;
+            }
 
             const res = await fetch(`${API.base}/api/templates`, {
               method: 'POST', headers: headers(), body: JSON.stringify({ name, template })
@@ -683,7 +689,13 @@
           async function updateTemplate(id) {
             const name = document.getElementById('tplName').value || 'Untitled Template';
             let template = getCompleteTemplate();
-            if (secondBasePdf) template._secondBasePdf = secondBasePdf; else delete template._secondBasePdf;
+            if (secondBasePdf) {
+              template._secondBasePdf = secondBasePdf;
+              template._multiPageEnabled = true;
+            } else {
+              delete template._secondBasePdf;
+              delete template._multiPageEnabled;
+            }
 
             const res = await fetch(`${API.base}/api/templates/${id}`, {
               method: 'PUT', headers: headers(), body: JSON.stringify({ name, template })
