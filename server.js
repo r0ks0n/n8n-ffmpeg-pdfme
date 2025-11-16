@@ -590,7 +590,9 @@ app.post('/api/render', auth, async (req, res) => {
               // Build basePdf array if _secondBasePdf exists
               let basePdfArray = template.basePdf;
               if (template._secondBasePdf) {
-                basePdfArray = [template.basePdf];
+                // Extract first PDF if basePdf is already an array
+                const firstPdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
+                basePdfArray = [firstPdf];
                 for (let i = 1; i < newSchemas.length; i++) {
                   basePdfArray.push(template._secondBasePdf);
                 }
