@@ -520,6 +520,12 @@ app.post('/api/render', auth, async (req, res) => {
       let finalTemplate = template;
       const schemas = template.schemas || [[]];
 
+      // Debug basePdf
+      console.log('[RENDER] template.basePdf type:', typeof template.basePdf);
+      console.log('[RENDER] template.basePdf is array:', Array.isArray(template.basePdf));
+      console.log('[RENDER] template._secondBasePdf exists:', !!template._secondBasePdf);
+      console.log('[RENDER] template._multiPageEnabled:', !!template._multiPageEnabled);
+
       if (template._multiPageEnabled && schemas.length >= 2) {
         console.log('[MULTI-PAGE] Multi-page layout detected with', schemas.length, 'pages');
 
