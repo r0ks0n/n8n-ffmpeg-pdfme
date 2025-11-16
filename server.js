@@ -614,6 +614,13 @@ app.post('/api/render', auth, async (req, res) => {
               console.log(`[MULTI-PAGE] Generated ${newSchemas.length} page schemas`);
             } else {
               console.log(`[MULTI-PAGE] Text fits on single page, no splitting needed`);
+              // Use only first page schema and first basePdf
+              const firstPdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
+              finalTemplate = {
+                ...template,
+                basePdf: firstPdf, // Single PDF string, not array
+                schemas: [firstPageSchema] // Only first page schema
+              };
             }
           }
         } else {
