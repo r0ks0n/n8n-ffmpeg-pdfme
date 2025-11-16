@@ -800,16 +800,31 @@
             console.log(`[PAGE-SWITCH] Switched to editing Page ${pageNumber}`);
           }
 
-          // Recreate designer instance (needed for basePdf changes)
+          // Update designer template (use updateTemplate instead of recreating)
           function recreateDesigner(newTemplate) {
-            container.innerHTML = '';
-            designer = new Designer({
-              domContainer: container,
-              template: newTemplate,
-              plugins,
-              options: designerOptions
-            });
-            console.log('[DESIGNER] Recreated with', Array.isArray(newTemplate.basePdf) ? `${newTemplate.basePdf.length} pages` : '1 page');
+            // Ensure template has all required properties
+            const validTemplate = {
+              basePdf: newTemplate.basePdf,
+              schemas: newTemplate.schemas || [[]],
+              // Preserve other template properties if they exist
+              ...(newTemplate.sampledata && { sampledata: newTemplate.sampledata }),
+              ...(newTemplate.columns && { columns: newTemplate.columns })
+            };
+
+            console.log('[DESIGNER] Updating template with basePdf type:', typeof validTemplate.basePdf);
+            console.log('[DESIGNER] basePdf is array:', Array.isArray(validTemplate.basePdf));
+            console.log('[DESIGNER] basePdf length:', validTemplate.basePdf?.length || 'N/A');
+            console.log('[DESIGNER] schemas length:', validTemplate.schemas.length);
+            console.log('[DESIGNER] schemas[0] length:', validTemplate.schemas[0]?.length || 0);
+
+            try {
+              // Use updateTemplate() method instead of recreating the Designer
+              designer.updateTemplate(validTemplate);
+              console.log('[DESIGNER] Successfully updated template');
+            } catch (err) {
+              console.error('[DESIGNER] Failed to update template:', err);
+              alert('Failed to switch pages: ' + err.message);
+            }
           }
 
           // Get complete template (merge all pages for saving)
