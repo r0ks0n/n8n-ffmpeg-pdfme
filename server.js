@@ -210,7 +210,7 @@ function interpolateAll(obj, ctx) {
  * @param {Object} fontData - Optional embedded font data (from PDFme)
  * @returns {Promise<number>} - Actual character capacity based on rendering
  */
-async function calculateTextCapacityWithRendering(text, widthMm, heightMm, fontSize = 11, lineHeight = 1.5, fontData = null) {
+async function calculateTextCapacityWithRendering(text, widthMm, heightMm, fontSize = 11, lineHeight = 1.5, fontData = null, characterSpacing = 0) {
   try {
     const { PDFDocument, StandardFonts } = await import('pdf-lib');
 
@@ -230,60 +230,82 @@ async function calculateTextCapacityWithRendering(text, widthMm, heightMm, fontS
       font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     }
 
-    // Convert mm to pt
+    // Convert mm to pt, add 2mm padding (PDFme adds internal padding)
+    const paddingPt = 2 * 2.83465; // 2mm padding top/bottom
     const widthPt = widthMm * 2.83465;
-    const heightPt = heightMm * 2.83465;
+    const heightPt = (heightMm * 2.83465) - (paddingPt * 2); // Subtract padding from height
     const lineHeightPt = fontSize * lineHeight;
 
-    // Calculate maximum number of lines that can fit
+    // Calculate maximum number of lines that can fit (with padding consideration)
     const maxLines = Math.floor(heightPt / lineHeightPt);
 
-    console.log(`[CAPACITY DEBUG] Frame: ${widthMm}×${heightMm}mm = ${widthPt}×${heightPt}pt`);
-    console.log(`[CAPACITY DEBUG] Font: ${fontSize}pt, Line height: ${lineHeight} (${lineHeightPt}pt)`);
-    console.log(`[CAPACITY DEBUG] Max lines that fit: ${maxLines} lines`);
+    console.log(`[CAPACITY] Frame: ${widthMm}×${heightMm}mm (${widthPt.toFixed(2)}×${(heightMm * 2.83465).toFixed(2)}pt with ${paddingPt.toFixed(2)}pt padding)`);
+    console.log(`[CAPACITY] Font: ${fontSize}pt, Line height: ${lineHeight}x (${lineHeightPt.toFixed(2)}pt per line)`);
+    console.log(`[CAPACITY] Character spacing: ${characterSpacing}pt`);
+    console.log(`[CAPACITY] Max lines available: ${maxLines}`);
 
-    // Simulate word wrapping line by line
-    const words = text.split(/\s+/);
-    let currentLine = '';
+    // Split text into paragraphs first (respect \n\n and \n)
+    const paragraphs = text.split(/\n/);
     let lines = [];
-    let totalCharsProcessed = 0;
+    let charCount = 0;
 
-    for (let i = 0; i < words.length; i++) {
-      const word = words[i];
-      const testLine = currentLine ? `${currentLine} ${word}` : word;
-      const testWidth = font.widthOfTextAtSize(testLine, fontSize);
-
-      if (testWidth > widthPt && currentLine) {
-        // Current line is full - save it and check if we have room for more lines
-        if (lines.length >= maxLines) {
-          // No more room for lines - stop here
-          console.log(`[CAPACITY DEBUG] Reached max lines (${maxLines}), stopping`);
+    for (const paragraph of paragraphs) {
+      if (!paragraph.trim()) {
+        // Empty line (paragraph break)
+        if (lines.length < maxLines) {
+          lines.push('');
+          charCount += 1; // Count the newline
+        } else {
           break;
         }
+        continue;
+      }
+
+      // Word-wrap this paragraph
+      const words = paragraph.split(/\s+/).filter(w => w.length > 0);
+      let currentLine = '';
+
+      for (const word of words) {
+        const testLine = currentLine ? `${currentLine} ${word}` : word;
+
+        // Measure actual width with character spacing
+        let testWidth = font.widthOfTextAtSize(testLine, fontSize);
+        if (characterSpacing > 0) {
+          testWidth += testLine.length * characterSpacing;
+        }
+
+        if (testWidth > widthPt && currentLine) {
+          // Line is full - save it and start new line
+          if (lines.length >= maxLines) {
+            console.log(`[CAPACITY] Reached max lines (${maxLines}), stopping`);
+            return charCount;
+          }
+          lines.push(currentLine);
+          charCount += currentLine.length + 1; // +1 for space between lines
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      }
+
+      // Add last line of paragraph if we have room
+      if (currentLine && lines.length < maxLines) {
         lines.push(currentLine);
-        totalCharsProcessed += currentLine.length + 1; // +1 for space
-        currentLine = word;
-      } else {
-        currentLine = testLine;
+        charCount += currentLine.length + 1; // +1 for newline at end of paragraph
+      } else if (currentLine) {
+        // No room for this line - return current capacity
+        console.log(`[CAPACITY] No room for last line, stopping at ${charCount} chars`);
+        return charCount;
       }
     }
 
-    // Add last line if we still have room
-    if (currentLine && lines.length < maxLines) {
-      lines.push(currentLine);
-      totalCharsProcessed += currentLine.length;
-    }
+    console.log(`[CAPACITY] ✓ Fits ${lines.length} lines, ${charCount} chars total`);
+    console.log(`[CAPACITY] First 3 lines: ${lines.slice(0, 3).map(l => `"${l.substring(0, 40)}..."`).join(' | ')}`);
+    console.log(`[CAPACITY] Last 3 lines: ${lines.slice(-3).map(l => `"${l.substring(0, 40)}..."`).join(' | ')}`);
 
-    // Calculate actual capacity based on lines that fit
-    const fittedText = lines.join(' ');
-    const capacity = fittedText.length;
-
-    console.log(`[RENDER-BASED CAPACITY] Result: ${lines.length} lines fit, ${capacity} chars total`);
-    console.log(`[CAPACITY DEBUG] Lines content: ${lines.map((l, i) => `Line ${i+1}: "${l.substring(0, 50)}..." (${l.length} chars)`).join(', ')}`);
-
-    return capacity;
+    return charCount;
   } catch (error) {
-    console.warn('[RENDER-BASED CAPACITY] Failed, falling back to estimation:', error.message);
+    console.warn('[CAPACITY] Measurement failed, using estimation:', error.message);
     // Fallback to old calculation if rendering fails
     return calculateTextCapacityEstimate(widthMm, heightMm, fontSize, lineHeight);
   }
@@ -667,18 +689,20 @@ app.post('/api/render', auth, async (req, res) => {
               fieldText, // Pass actual text for measurement
               firstPageTextField.width || 170,
               firstPageTextField.height || 180,
-              firstPageTextField.fontSize || 11,
+              firstPageTextField.fontSize || firstPageTextField.size || 11, // Support both fontSize and size
               firstPageTextField.lineHeight || 1.5,
-              customFonts[firstPageTextField.fontName] || null // Pass custom font if available
+              customFonts[firstPageTextField.fontName] || null, // Pass custom font if available
+              firstPageTextField.characterSpacing || 0 // Pass character spacing
             );
 
             const continuationCapacity = await calculateTextCapacityWithRendering(
               fieldText, // Pass actual text for measurement
               secondPageTextField.width || 170,
               secondPageTextField.height || 260,
-              secondPageTextField.fontSize || 11,
+              secondPageTextField.fontSize || secondPageTextField.size || 11, // Support both fontSize and size
               secondPageTextField.lineHeight || 1.5,
-              customFonts[secondPageTextField.fontName] || null // Pass custom font if available
+              customFonts[secondPageTextField.fontName] || null, // Pass custom font if available
+              secondPageTextField.characterSpacing || 0 // Pass character spacing
             );
 
             // Split text if it exceeds first page capacity
