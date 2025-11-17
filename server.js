@@ -212,20 +212,26 @@ function calculateTextCapacity(width, height, fontSize = 11, lineHeight = 1.5, c
   const widthPt = width * 2.83465;
   const heightPt = height * 2.83465;
 
-  // Average character width (approximate, varies by font)
-  const avgCharWidth = fontSize * 0.5 + characterSpacing;
+  // More accurate character width for proportional fonts (0.48 instead of 0.5)
+  // This accounts for the fact that most characters are narrower than the font size
+  const avgCharWidth = fontSize * 0.48 + characterSpacing;
 
-  // Calculate characters per line
-  const charsPerLine = Math.floor(widthPt / avgCharWidth);
+  // Calculate characters per line with safety margin (use 95% of width)
+  const usableWidthPt = widthPt * 0.95;
+  const charsPerLine = Math.floor(usableWidthPt / avgCharWidth);
 
-  // Calculate lines per page
+  // Calculate lines per page with safety margin (use 90% of height for paragraph spacing)
   const lineHeightPt = fontSize * lineHeight;
-  const linesPerPage = Math.floor(heightPt / lineHeightPt);
+  const usableHeightPt = heightPt * 0.90;
+  const linesPerPage = Math.floor(usableHeightPt / lineHeightPt);
 
-  // Total capacity (conservative estimate)
-  const capacity = charsPerLine * linesPerPage;
+  // Total capacity - reduced by 10% to account for word wrapping and paragraph breaks
+  // Word wrapping means lines rarely fill completely (average ~85% full)
+  const rawCapacity = charsPerLine * linesPerPage;
+  const capacity = Math.floor(rawCapacity * 0.85);
 
-  console.log(`[TEXT CAPACITY] Width:${width}mm Height:${height}mm Font:${fontSize}pt -> ${charsPerLine} chars/line × ${linesPerPage} lines = ${capacity} chars`);
+  console.log(`[TEXT CAPACITY] Field: ${width}mm×${height}mm, Font: ${fontSize}pt, Line height: ${lineHeight}`);
+  console.log(`[TEXT CAPACITY] → ${charsPerLine} chars/line × ${linesPerPage} lines = ${rawCapacity} raw → ${capacity} adjusted (with word-wrap margin)`);
 
   return capacity;
 }
