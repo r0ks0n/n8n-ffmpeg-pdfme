@@ -695,9 +695,20 @@ app.post('/api/render', auth, async (req, res) => {
       } else {
         // Standard single-page generation
         console.log('[RENDER] Generating single-page PDF');
+
+        // CRITICAL: Clean schema to remove content field
+        const cleanSinglePageSchema = schemas[0].map(field => {
+          if (field.type === 'multiVariableText' && field.content) {
+            const { content, ...cleanField } = field;
+            console.log(`[RENDER] Removed content from ${field.name} in single-page schema`);
+            return cleanField;
+          }
+          return field;
+        });
+
         const singlePageTemplate = {
           basePdf: firstBasePdfString, // STRING format - valid!
-          schemas: [schemas[0]]
+          schemas: [cleanSinglePageSchema] // CLEANED schema without content field
         };
 
         const generateOptions = {};
