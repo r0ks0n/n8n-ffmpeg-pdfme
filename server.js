@@ -521,17 +521,18 @@ app.post('/api/render', auth, async (req, res) => {
       console.log('[RENDER] Final PDFme inputs:', JSON.stringify(pdfInputData, null, 2));
 
       // CRITICAL FIX: Clean template schemas before processing
-      // Remove 'content' field from multiVariableText schemas to prevent JSON validation errors
+      // Remove 'content' field from text/multiVariableText schemas to prevent JSON validation errors
       // PDFme expects content to be provided via inputs array, not in schema
       const cleanedTemplate = JSON.parse(JSON.stringify(template)); // Deep clone
       if (cleanedTemplate.schemas && Array.isArray(cleanedTemplate.schemas)) {
         cleanedTemplate.schemas.forEach(pageSchemas => {
           if (!Array.isArray(pageSchemas)) return;
           pageSchemas.forEach(schema => {
-            if (schema.type === 'multiVariableText' && schema.content) {
+            if ((schema.type === 'text' || schema.type === 'multiVariableText') && schema.content) {
               // Store original content for reference but remove from schema
               schema._originalContent = schema.content;
               delete schema.content;
+              console.log(`[RENDER] Initial cleaning: removed content from ${schema.name} (${schema.type})`);
             }
           });
         });
@@ -567,9 +568,9 @@ app.post('/api/render', auth, async (req, res) => {
         const firstPageSchema = schemas[0] || [];
         const secondPageSchema = schemas[1] || [];
 
-        // Find multiVariableText fields in both pages
-        const firstPageTextField = firstPageSchema.find(field => field.type === 'multiVariableText');
-        const secondPageTextField = secondPageSchema.find(field => field.type === 'multiVariableText');
+        // Find text fields in both pages (support both 'text' and 'multiVariableText' types)
+        const firstPageTextField = firstPageSchema.find(field => field.type === 'text' || field.type === 'multiVariableText');
+        const secondPageTextField = secondPageSchema.find(field => field.type === 'text' || field.type === 'multiVariableText');
 
         if (firstPageTextField && secondPageTextField) {
           const fieldName = firstPageTextField.name;
@@ -622,25 +623,25 @@ app.post('/api/render', auth, async (req, res) => {
         // Get field name and schemas (ALREADY CLEANED - no content fields!)
         const firstPageSchema = schemas[0];
         const secondPageSchema = schemas[1];
-        const fieldName = firstPageSchema.find(f => f.type === 'multiVariableText')?.name;
+        const fieldName = firstPageSchema.find(f => f.type === 'text' || f.type === 'multiVariableText')?.name;
 
         console.log('[MULTI-PAGE-MERGE] First page schema fields:', firstPageSchema.map(f => `${f.name} (${f.type}) content=${!!f.content}`));
         console.log('[MULTI-PAGE-MERGE] Second page schema fields:', secondPageSchema.map(f => `${f.name} (${f.type}) content=${!!f.content}`));
 
         // CRITICAL: Ensure no content fields exist in schemas before generation
         const cleanFirstPageSchema = firstPageSchema.map(field => {
-          if (field.type === 'multiVariableText' && field.content) {
+          if ((field.type === 'text' || field.type === 'multiVariableText') && field.content) {
             const { content, ...cleanField } = field;
-            console.log(`[MULTI-PAGE-MERGE] Removed content from ${field.name} in Page 1 schema`);
+            console.log(`[MULTI-PAGE-MERGE] Removed content from ${field.name} (${field.type}) in Page 1 schema`);
             return cleanField;
           }
           return field;
         });
 
         const cleanSecondPageSchema = secondPageSchema.map(field => {
-          if (field.type === 'multiVariableText' && field.content) {
+          if ((field.type === 'text' || field.type === 'multiVariableText') && field.content) {
             const { content, ...cleanField } = field;
-            console.log(`[MULTI-PAGE-MERGE] Removed content from ${field.name} in Page 2 schema`);
+            console.log(`[MULTI-PAGE-MERGE] Removed content from ${field.name} (${field.type}) in Page 2 schema`);
             return cleanField;
           }
           return field;
@@ -698,9 +699,9 @@ app.post('/api/render', auth, async (req, res) => {
 
         // CRITICAL: Clean schema to remove content field
         const cleanSinglePageSchema = schemas[0].map(field => {
-          if (field.type === 'multiVariableText' && field.content) {
+          if ((field.type === 'text' || field.type === 'multiVariableText') && field.content) {
             const { content, ...cleanField } = field;
-            console.log(`[RENDER] Removed content from ${field.name} in single-page schema`);
+            console.log(`[RENDER] Removed content from ${field.name} (${field.type}) in single-page schema`);
             return cleanField;
           }
           return field;
