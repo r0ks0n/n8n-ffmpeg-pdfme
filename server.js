@@ -235,39 +235,51 @@ async function calculateTextCapacityWithRendering(text, widthMm, heightMm, fontS
     const heightPt = heightMm * 2.83465;
     const lineHeightPt = fontSize * lineHeight;
 
-    // Simulate word wrapping and count how many characters fit
+    // Calculate maximum number of lines that can fit
+    const maxLines = Math.floor(heightPt / lineHeightPt);
+
+    console.log(`[CAPACITY DEBUG] Frame: ${widthMm}×${heightMm}mm = ${widthPt}×${heightPt}pt`);
+    console.log(`[CAPACITY DEBUG] Font: ${fontSize}pt, Line height: ${lineHeight} (${lineHeightPt}pt)`);
+    console.log(`[CAPACITY DEBUG] Max lines that fit: ${maxLines} lines`);
+
+    // Simulate word wrapping line by line
     const words = text.split(/\s+/);
     let currentLine = '';
     let lines = [];
+    let totalCharsProcessed = 0;
 
-    for (const word of words) {
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
       const testLine = currentLine ? `${currentLine} ${word}` : word;
       const testWidth = font.widthOfTextAtSize(testLine, fontSize);
 
       if (testWidth > widthPt && currentLine) {
-        // Line is full, start new line
+        // Current line is full - save it and check if we have room for more lines
+        if (lines.length >= maxLines) {
+          // No more room for lines - stop here
+          console.log(`[CAPACITY DEBUG] Reached max lines (${maxLines}), stopping`);
+          break;
+        }
         lines.push(currentLine);
+        totalCharsProcessed += currentLine.length + 1; // +1 for space
         currentLine = word;
       } else {
         currentLine = testLine;
       }
-
-      // Check if we've exceeded available height
-      if (lines.length * lineHeightPt > heightPt) {
-        break;
-      }
     }
 
-    // Add last line if within height
-    if (currentLine && lines.length * lineHeightPt < heightPt) {
+    // Add last line if we still have room
+    if (currentLine && lines.length < maxLines) {
       lines.push(currentLine);
+      totalCharsProcessed += currentLine.length;
     }
 
-    // Calculate total characters that fit
+    // Calculate actual capacity based on lines that fit
     const fittedText = lines.join(' ');
     const capacity = fittedText.length;
 
-    console.log(`[RENDER-BASED CAPACITY] ${widthMm}mm×${heightMm}mm, Font:${fontSize}pt → ${lines.length} lines → ${capacity} chars`);
+    console.log(`[RENDER-BASED CAPACITY] Result: ${lines.length} lines fit, ${capacity} chars total`);
+    console.log(`[CAPACITY DEBUG] Lines content: ${lines.map((l, i) => `Line ${i+1}: "${l.substring(0, 50)}..." (${l.length} chars)`).join(', ')}`);
 
     return capacity;
   } catch (error) {
