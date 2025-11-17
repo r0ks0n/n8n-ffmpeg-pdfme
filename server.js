@@ -198,41 +198,105 @@ function interpolateAll(obj, ctx) {
 }
 
 // ---- Multi-page text splitting helpers ----
+
 /**
- * Calculate approximate character capacity for a text frame
+ * RENDER-BASED text capacity calculation using actual PDF font metrics
+ * This simulates PDFme's text rendering to determine EXACTLY how much text fits
+ * @param {string} text - Full text to measure
+ * @param {number} widthMm - Frame width in mm
+ * @param {number} heightMm - Frame height in mm
+ * @param {number} fontSize - Font size in pt
+ * @param {number} lineHeight - Line height multiplier
+ * @param {Object} fontData - Optional embedded font data (from PDFme)
+ * @returns {Promise<number>} - Actual character capacity based on rendering
+ */
+async function calculateTextCapacityWithRendering(text, widthMm, heightMm, fontSize = 11, lineHeight = 1.5, fontData = null) {
+  try {
+    const { PDFDocument, StandardFonts } = await import('pdf-lib');
+
+    // Create temporary PDF to measure text
+    const pdfDoc = await PDFDocument.create();
+
+    // Load font (use standard font or custom if provided)
+    let font;
+    if (fontData && fontData.data) {
+      // Custom font provided
+      const fontBytes = typeof fontData.data === 'string'
+        ? await fetch(fontData.data).then(r => r.arrayBuffer())
+        : fontData.data;
+      font = await pdfDoc.embedFont(fontBytes);
+    } else {
+      // Use standard Helvetica as fallback
+      font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    }
+
+    // Convert mm to pt
+    const widthPt = widthMm * 2.83465;
+    const heightPt = heightMm * 2.83465;
+    const lineHeightPt = fontSize * lineHeight;
+
+    // Simulate word wrapping and count how many characters fit
+    const words = text.split(/\s+/);
+    let currentLine = '';
+    let lines = [];
+
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+
+      if (testWidth > widthPt && currentLine) {
+        // Line is full, start new line
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+
+      // Check if we've exceeded available height
+      if (lines.length * lineHeightPt > heightPt) {
+        break;
+      }
+    }
+
+    // Add last line if within height
+    if (currentLine && lines.length * lineHeightPt < heightPt) {
+      lines.push(currentLine);
+    }
+
+    // Calculate total characters that fit
+    const fittedText = lines.join(' ');
+    const capacity = fittedText.length;
+
+    console.log(`[RENDER-BASED CAPACITY] ${widthMm}mm×${heightMm}mm, Font:${fontSize}pt → ${lines.length} lines → ${capacity} chars`);
+
+    return capacity;
+  } catch (error) {
+    console.warn('[RENDER-BASED CAPACITY] Failed, falling back to estimation:', error.message);
+    // Fallback to old calculation if rendering fails
+    return calculateTextCapacityEstimate(widthMm, heightMm, fontSize, lineHeight);
+  }
+}
+
+/**
+ * FALLBACK: Estimate character capacity (used if render-based fails)
  * @param {number} width - Frame width in mm
  * @param {number} height - Frame height in mm
  * @param {number} fontSize - Font size in pt
- * @param {number} lineHeight - Line height multiplier (e.g., 1.5)
- * @param {number} characterSpacing - Character spacing in pt
+ * @param {number} lineHeight - Line height multiplier
  * @returns {number} - Estimated character capacity
  */
-function calculateTextCapacity(width, height, fontSize = 11, lineHeight = 1.5, characterSpacing = 0) {
-  // Convert mm to pt (1mm ≈ 2.83465pt)
+function calculateTextCapacityEstimate(width, height, fontSize = 11, lineHeight = 1.5) {
   const widthPt = width * 2.83465;
   const heightPt = height * 2.83465;
-
-  // More accurate character width for proportional fonts (0.48 instead of 0.5)
-  // This accounts for the fact that most characters are narrower than the font size
-  const avgCharWidth = fontSize * 0.48 + characterSpacing;
-
-  // Calculate characters per line with safety margin (use 95% of width)
+  const avgCharWidth = fontSize * 0.48;
   const usableWidthPt = widthPt * 0.95;
   const charsPerLine = Math.floor(usableWidthPt / avgCharWidth);
-
-  // Calculate lines per page with safety margin (use 90% of height for paragraph spacing)
   const lineHeightPt = fontSize * lineHeight;
   const usableHeightPt = heightPt * 0.90;
   const linesPerPage = Math.floor(usableHeightPt / lineHeightPt);
+  const capacity = Math.floor(charsPerLine * linesPerPage * 0.85);
 
-  // Total capacity - reduced by 10% to account for word wrapping and paragraph breaks
-  // Word wrapping means lines rarely fill completely (average ~85% full)
-  const rawCapacity = charsPerLine * linesPerPage;
-  const capacity = Math.floor(rawCapacity * 0.85);
-
-  console.log(`[TEXT CAPACITY] Field: ${width}mm×${height}mm, Font: ${fontSize}pt, Line height: ${lineHeight}`);
-  console.log(`[TEXT CAPACITY] → ${charsPerLine} chars/line × ${linesPerPage} lines = ${rawCapacity} raw → ${capacity} adjusted (with word-wrap margin)`);
-
+  console.log(`[ESTIMATED CAPACITY] ${width}mm×${height}mm → ${capacity} chars`);
   return capacity;
 }
 
@@ -585,21 +649,24 @@ app.post('/api/render', auth, async (req, res) => {
           if (fieldText && typeof fieldText === 'string') {
             console.log(`[MULTI-PAGE] Processing field "${fieldName}" with ${fieldText.length} characters`);
 
-            // Calculate text capacity
-            const firstPageCapacity = calculateTextCapacity(
+            // Calculate text capacity using RENDER-BASED measurement (actual font metrics)
+            // This simulates PDFme's rendering to determine EXACTLY how much text fits
+            const firstPageCapacity = await calculateTextCapacityWithRendering(
+              fieldText, // Pass actual text for measurement
               firstPageTextField.width || 170,
               firstPageTextField.height || 180,
               firstPageTextField.fontSize || 11,
               firstPageTextField.lineHeight || 1.5,
-              firstPageTextField.characterSpacing || 0
+              customFonts[firstPageTextField.fontName] || null // Pass custom font if available
             );
 
-            const continuationCapacity = calculateTextCapacity(
+            const continuationCapacity = await calculateTextCapacityWithRendering(
+              fieldText, // Pass actual text for measurement
               secondPageTextField.width || 170,
               secondPageTextField.height || 260,
               secondPageTextField.fontSize || 11,
               secondPageTextField.lineHeight || 1.5,
-              secondPageTextField.characterSpacing || 0
+              customFonts[secondPageTextField.fontName] || null // Pass custom font if available
             );
 
             // Split text if it exceeds first page capacity
