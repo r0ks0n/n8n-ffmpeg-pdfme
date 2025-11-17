@@ -619,10 +619,32 @@ app.post('/api/render', auth, async (req, res) => {
         const { PDFDocument } = await import('pdf-lib');
         const mergedPdf = await PDFDocument.create();
 
-        // Get field name and schemas
+        // Get field name and schemas (ALREADY CLEANED - no content fields!)
         const firstPageSchema = schemas[0];
         const secondPageSchema = schemas[1];
         const fieldName = firstPageSchema.find(f => f.type === 'multiVariableText')?.name;
+
+        console.log('[MULTI-PAGE-MERGE] First page schema fields:', firstPageSchema.map(f => `${f.name} (${f.type}) content=${!!f.content}`));
+        console.log('[MULTI-PAGE-MERGE] Second page schema fields:', secondPageSchema.map(f => `${f.name} (${f.type}) content=${!!f.content}`));
+
+        // CRITICAL: Ensure no content fields exist in schemas before generation
+        const cleanFirstPageSchema = firstPageSchema.map(field => {
+          if (field.type === 'multiVariableText' && field.content) {
+            const { content, ...cleanField } = field;
+            console.log(`[MULTI-PAGE-MERGE] Removed content from ${field.name} in Page 1 schema`);
+            return cleanField;
+          }
+          return field;
+        });
+
+        const cleanSecondPageSchema = secondPageSchema.map(field => {
+          if (field.type === 'multiVariableText' && field.content) {
+            const { content, ...cleanField } = field;
+            console.log(`[MULTI-PAGE-MERGE] Removed content from ${field.name} in Page 2 schema`);
+            return cleanField;
+          }
+          return field;
+        });
 
         // Generate options
         const generateOptions = {};
@@ -635,7 +657,7 @@ app.post('/api/render', auth, async (req, res) => {
         const page1InputData = { [fieldName]: textChunks[0] };
         const page1Template = {
           basePdf: firstBasePdfString, // STRING format - valid!
-          schemas: [firstPageSchema]
+          schemas: [cleanFirstPageSchema] // CLEANED schema without content field
         };
         const page1Pdf = await generate({
           template: page1Template,
@@ -654,7 +676,7 @@ app.post('/api/render', auth, async (req, res) => {
           const pageInputData = { [fieldName]: textChunks[i] };
           const pageTemplate = {
             basePdf: secondBasePdfString, // STRING format - valid!
-            schemas: [secondPageSchema]
+            schemas: [cleanSecondPageSchema] // CLEANED schema without content field
           };
           const pagePdf = await generate({
             template: pageTemplate,
