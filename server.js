@@ -537,17 +537,31 @@ app.post('/api/render', auth, async (req, res) => {
         });
       }
 
-      // Check if multi-page text layout is enabled (user added Page 2 in designer)
-      let finalTemplate = cleanedTemplate;
+      // Extract base PDFs as strings
+      let firstBasePdfString, secondBasePdfString;
+
+      if (typeof template.basePdf === 'string') {
+        firstBasePdfString = template.basePdf;
+      } else if (Array.isArray(template.basePdf)) {
+        firstBasePdfString = template.basePdf[0];
+      } else if (typeof template.basePdf === 'object' && template.basePdf !== null) {
+        firstBasePdfString = template.basePdf['0'] || template.basePdf[0] || Object.values(template.basePdf)[0];
+      } else {
+        firstBasePdfString = template.basePdf;
+      }
+
+      secondBasePdfString = template._secondBasePdf;
+
+      console.log('[RENDER] First basePdf type:', typeof firstBasePdfString);
+      console.log('[RENDER] Second basePdf exists:', !!secondBasePdfString);
+      console.log('[RENDER] Multi-page enabled:', !!template._multiPageEnabled);
+
+      // Check if multi-page text layout is enabled
       const schemas = cleanedTemplate.schemas || [[]];
+      let generateMultiplePDFs = false;
+      let textChunks = [];
 
-      // Debug basePdf
-      console.log('[RENDER] template.basePdf type:', typeof template.basePdf);
-      console.log('[RENDER] template.basePdf is array:', Array.isArray(template.basePdf));
-      console.log('[RENDER] template._secondBasePdf exists:', !!template._secondBasePdf);
-      console.log('[RENDER] template._multiPageEnabled:', !!template._multiPageEnabled);
-
-      if (template._multiPageEnabled && schemas.length >= 2) {
+      if (template._multiPageEnabled && schemas.length >= 2 && secondBasePdfString) {
         console.log('[MULTI-PAGE] Multi-page layout detected with', schemas.length, 'pages');
 
         const firstPageSchema = schemas[0] || [];
@@ -564,7 +578,7 @@ app.post('/api/render', auth, async (req, res) => {
           if (fieldText && typeof fieldText === 'string') {
             console.log(`[MULTI-PAGE] Processing field "${fieldName}" with ${fieldText.length} characters`);
 
-            // Calculate text capacity based on actual field dimensions from designer
+            // Calculate text capacity
             const firstPageCapacity = calculateTextCapacity(
               firstPageTextField.width || 170,
               firstPageTextField.height || 180,
@@ -583,106 +597,11 @@ app.post('/api/render', auth, async (req, res) => {
 
             // Split text if it exceeds first page capacity
             if (fieldText.length > firstPageCapacity) {
-              const textChunks = splitTextIntelligently(fieldText, firstPageCapacity, continuationCapacity);
-              console.log(`[MULTI-PAGE] Split text into ${textChunks.length} pages`);
-
-              // Create new schemas array with dynamic pages
-              const newSchemas = [];
-
-              // First page (keep all fields from original)
-              newSchemas.push(firstPageSchema);
-
-              // Update input data for first page
-              pdfInputData[fieldName] = textChunks[0];
-
-              // Create continuation pages using Page 2 layout
-              for (let i = 1; i < textChunks.length; i++) {
-                // Clone Page 2 schema fields for each continuation page
-                const continuationSchemas = secondPageSchema.map(field => {
-                  if (field.type === 'multiVariableText') {
-                    // CRITICAL: Create clean copy without content field
-                    const cleanField = {
-                      ...field,
-                      name: `${fieldName}_page${i + 1}`
-                    };
-                    // Remove content field to prevent JSON validation error
-                    delete cleanField.content;
-                    return cleanField;
-                  }
-                  return field;
-                });
-
-                newSchemas.push(continuationSchemas);
-
-                // Add continuation text to input data
-                pdfInputData[`${fieldName}_page${i + 1}`] = textChunks[i];
-              }
-
-              // Build basePdf object if _secondBasePdf exists
-              // PDFme requires basePdf as object with keys '0', '1', etc for multi-page (NOT '/0', '/1')
-              let basePdfForGenerator = template.basePdf;
-              if (template._secondBasePdf) {
-                // CRITICAL FIX: Extract first PDF string correctly from array, object, or string
-                let firstPdf;
-                if (Array.isArray(template.basePdf)) {
-                  firstPdf = template.basePdf[0];
-                  console.log('[MULTI-PAGE] Extracted firstPdf from array');
-                } else if (typeof template.basePdf === 'object' && template.basePdf !== null) {
-                  // Object format: {'0': pdfString, '1': pdfString}
-                  firstPdf = template.basePdf['0'] || template.basePdf[0] || Object.values(template.basePdf)[0];
-                  console.log('[MULTI-PAGE] Extracted firstPdf from object');
-                } else {
-                  // String format (single PDF)
-                  firstPdf = template.basePdf;
-                  console.log('[MULTI-PAGE] Using firstPdf as-is (string)');
-                }
-
-                // Safety check: Ensure firstPdf is a string
-                if (typeof firstPdf !== 'string') {
-                  console.error('[MULTI-PAGE] ERROR: firstPdf is not a string!', typeof firstPdf);
-                  throw new Error('Failed to extract basePdf as string for page 0');
-                }
-
-                // Build object with '0', '1', etc keys for each page (PDFme v5 format)
-                basePdfForGenerator = {};
-                for (let i = 0; i < newSchemas.length; i++) {
-                  basePdfForGenerator[String(i)] = i === 0 ? firstPdf : template._secondBasePdf;
-                }
-
-                console.log(`[MULTI-PAGE] Built basePdf object with ${Object.keys(basePdfForGenerator).length} pages`);
-              }
-
-              // Update template with new schemas
-              // CRITICAL: Use cleanedTemplate to preserve content field removal
-              finalTemplate = {
-                ...cleanedTemplate,
-                schemas: newSchemas,
-                basePdf: basePdfForGenerator
-              };
-
-              console.log(`[MULTI-PAGE] Generated ${newSchemas.length} page schemas`);
+              textChunks = splitTextIntelligently(fieldText, firstPageCapacity, continuationCapacity);
+              console.log(`[MULTI-PAGE] Split text into ${textChunks.length} pages - will generate separate PDFs and merge`);
+              generateMultiplePDFs = true;
             } else {
-              console.log(`[MULTI-PAGE] Text fits on single page, no splitting needed`);
-              // Use only first page schema and first basePdf
-              let firstPdf;
-              if (typeof template.basePdf === 'string') {
-                firstPdf = template.basePdf;
-              } else if (Array.isArray(template.basePdf)) {
-                firstPdf = template.basePdf[0];
-              } else if (typeof template.basePdf === 'object' && template.basePdf !== null) {
-                // Extract first PDF from object format {'0': pdf, '1': pdf}
-                firstPdf = template.basePdf['0'] || template.basePdf[0] || Object.values(template.basePdf)[0];
-              } else {
-                firstPdf = template.basePdf;
-              }
-
-              // CRITICAL: Use cleanedTemplate to preserve content field removal
-              finalTemplate = {
-                ...cleanedTemplate,
-                basePdf: firstPdf, // CRITICAL: Single PDF string for single page
-                schemas: [firstPageSchema] // Only first page schema
-              };
-              console.log(`[MULTI-PAGE] Single page mode - basePdf is string:`, typeof firstPdf === 'string');
+              console.log(`[MULTI-PAGE] Text fits on single page, using Page 1 layout only`);
             }
           }
         } else {
@@ -690,86 +609,89 @@ app.post('/api/render', auth, async (req, res) => {
         }
       }
 
-      // CRITICAL: Clean content field AGAIN after multi-page processing
-      // Multi-page processing may have created new schemas that still have content field
-      if (finalTemplate.schemas && Array.isArray(finalTemplate.schemas)) {
-        finalTemplate.schemas.forEach(pageSchemas => {
-          if (!Array.isArray(pageSchemas)) return;
-          pageSchemas.forEach(schema => {
-            if (schema.type === 'multiVariableText' && schema.content) {
-              console.log(`[RENDER] Removing content field from schema "${schema.name}" before generation`);
-              delete schema.content;
-            }
-          });
-        });
-      }
+      // Generate PDF(s) - use different strategy for multi-page with different base PDFs
+      let u8;
 
-      // Detailed basePdf inspection before generating
-      console.log('[BASEPDF DEBUG] Inspecting basePdf before generation:');
-      console.log('[BASEPDF DEBUG] schemas length:', finalTemplate.schemas?.length);
-      console.log('[BASEPDF DEBUG] basePdf type:', typeof finalTemplate.basePdf);
-      console.log('[BASEPDF DEBUG] basePdf is array:', Array.isArray(finalTemplate.basePdf));
+      if (generateMultiplePDFs) {
+        // NEW APPROACH: Generate separate PDFs and merge with pdf-lib
+        console.log('[MULTI-PAGE-MERGE] Generating separate PDFs for each page');
 
-      // CRITICAL FIX: Format basePdf correctly based on page count
-      const pageCount = finalTemplate.schemas?.length || 1;
+        const { PDFDocument } = await import('pdf-lib');
+        const mergedPdf = await PDFDocument.create();
 
-      if (pageCount === 1) {
-        // Single page: MUST be string
-        if (Array.isArray(finalTemplate.basePdf)) {
-          console.log('[BASEPDF DEBUG] ⚠️  Single page but basePdf is array - extracting first element');
-          finalTemplate.basePdf = finalTemplate.basePdf[0];
-        } else if (typeof finalTemplate.basePdf === 'object' && finalTemplate.basePdf !== null && !Array.isArray(finalTemplate.basePdf)) {
-          console.log('[BASEPDF DEBUG] ⚠️  Single page but basePdf is object - extracting first value');
-          finalTemplate.basePdf = finalTemplate.basePdf['0'] || finalTemplate.basePdf[0] || Object.values(finalTemplate.basePdf)[0];
+        // Get field name and schemas
+        const firstPageSchema = schemas[0];
+        const secondPageSchema = schemas[1];
+        const fieldName = firstPageSchema.find(f => f.type === 'multiVariableText')?.name;
+
+        // Generate options
+        const generateOptions = {};
+        if (Object.keys(customFonts).length > 0) {
+          generateOptions.font = customFonts;
         }
-        console.log('[BASEPDF DEBUG] ✅ Single page mode - basePdf type:', typeof finalTemplate.basePdf);
+
+        // Generate Page 1
+        console.log('[MULTI-PAGE-MERGE] Generating Page 1 with first basePdf');
+        const page1InputData = { [fieldName]: textChunks[0] };
+        const page1Template = {
+          basePdf: firstBasePdfString, // STRING format - valid!
+          schemas: [firstPageSchema]
+        };
+        const page1Pdf = await generate({
+          template: page1Template,
+          inputs: [page1InputData],
+          plugins,
+          options: generateOptions
+        });
+        const page1Doc = await PDFDocument.load(page1Pdf);
+        const page1Pages = await mergedPdf.copyPages(page1Doc, page1Doc.getPageIndices());
+        page1Pages.forEach(page => mergedPdf.addPage(page));
+        console.log('[MULTI-PAGE-MERGE] Added Page 1');
+
+        // Generate continuation pages (Page 2, 3, 4, ...)
+        for (let i = 1; i < textChunks.length; i++) {
+          console.log(`[MULTI-PAGE-MERGE] Generating Page ${i + 1} with second basePdf`);
+          const pageInputData = { [fieldName]: textChunks[i] };
+          const pageTemplate = {
+            basePdf: secondBasePdfString, // STRING format - valid!
+            schemas: [secondPageSchema]
+          };
+          const pagePdf = await generate({
+            template: pageTemplate,
+            inputs: [pageInputData],
+            plugins,
+            options: generateOptions
+          });
+          const pageDoc = await PDFDocument.load(pagePdf);
+          const pagePages = await mergedPdf.copyPages(pageDoc, pageDoc.getPageIndices());
+          pagePages.forEach(page => mergedPdf.addPage(page));
+          console.log(`[MULTI-PAGE-MERGE] Added Page ${i + 1}`);
+        }
+
+        u8 = await mergedPdf.save();
+        console.log(`[MULTI-PAGE-MERGE] Successfully merged ${textChunks.length} pages into single PDF`);
       } else {
-        // Multi-page: MUST be object with string keys
-        if (Array.isArray(finalTemplate.basePdf)) {
-          console.log('[BASEPDF DEBUG] ⚠️  Multi-page but basePdf is array - converting to object format');
-          const basePdfArray = finalTemplate.basePdf;
-          const basePdfObject = {};
-          basePdfArray.forEach((pdf, idx) => {
-            basePdfObject[String(idx)] = pdf;
-          });
-          finalTemplate.basePdf = basePdfObject;
-          console.log('[BASEPDF DEBUG] ✅ Converted to object with keys:', Object.keys(basePdfObject));
-        } else if (typeof finalTemplate.basePdf === 'string') {
-          console.log('[BASEPDF DEBUG] ⚠️  Multi-page but basePdf is string - wrapping in object');
-          finalTemplate.basePdf = { '0': finalTemplate.basePdf };
+        // Standard single-page generation
+        console.log('[RENDER] Generating single-page PDF');
+        const singlePageTemplate = {
+          basePdf: firstBasePdfString, // STRING format - valid!
+          schemas: [schemas[0]]
+        };
+
+        const generateOptions = {};
+        if (Object.keys(customFonts).length > 0) {
+          generateOptions.font = customFonts;
         }
-        console.log('[BASEPDF DEBUG] ✅ Multi-page mode - basePdf keys:', Object.keys(finalTemplate.basePdf));
-      }
 
-      if (typeof finalTemplate.basePdf === 'object' && finalTemplate.basePdf !== null && !Array.isArray(finalTemplate.basePdf)) {
-        console.log('[BASEPDF DEBUG] basePdf is object with keys:', Object.keys(finalTemplate.basePdf));
-        Object.entries(finalTemplate.basePdf).forEach(([key, pdf]) => {
-          console.log(`[BASEPDF DEBUG] Key "${key}" type:`, typeof pdf);
-          if (typeof pdf === 'string') {
-            console.log(`[BASEPDF DEBUG] Key "${key}" length:`, pdf.length);
-            console.log(`[BASEPDF DEBUG] Key "${key}" starts with:`, pdf.substring(0, 50));
-            console.log(`[BASEPDF DEBUG] Key "${key}" is data URL:`, pdf.startsWith('data:'));
-          }
+        u8 = await generate({
+          template: singlePageTemplate,
+          inputs: [pdfInputData],
+          plugins,
+          options: generateOptions
         });
-      } else if (typeof finalTemplate.basePdf === 'string') {
-        console.log('[BASEPDF DEBUG] basePdf is single string (length:', finalTemplate.basePdf.length, ')');
-        console.log('[BASEPDF DEBUG] basePdf starts with:', finalTemplate.basePdf.substring(0, 50));
+        console.log('[RENDER] Single-page PDF generated successfully');
       }
 
-      // Generate PDF with final template, custom inputs, and custom fonts
-      const generateOptions = {};
-
-      // Only add font option if custom fonts are loaded
-      if (Object.keys(customFonts).length > 0) {
-        generateOptions.font = customFonts;
-      }
-
-      const u8 = await generate({
-        template: finalTemplate,
-        inputs: [pdfInputData],
-        plugins,
-        options: generateOptions
-      });
       pdfs.push(u8);
     }
 
