@@ -618,8 +618,26 @@ app.post('/api/render', auth, async (req, res) => {
               // PDFme requires basePdf as object with keys '0', '1', etc for multi-page (NOT '/0', '/1')
               let basePdfForGenerator = template.basePdf;
               if (template._secondBasePdf) {
-                // Extract first PDF if basePdf is already an array
-                const firstPdf = Array.isArray(template.basePdf) ? template.basePdf[0] : template.basePdf;
+                // CRITICAL FIX: Extract first PDF string correctly from array, object, or string
+                let firstPdf;
+                if (Array.isArray(template.basePdf)) {
+                  firstPdf = template.basePdf[0];
+                  console.log('[MULTI-PAGE] Extracted firstPdf from array');
+                } else if (typeof template.basePdf === 'object' && template.basePdf !== null) {
+                  // Object format: {'0': pdfString, '1': pdfString}
+                  firstPdf = template.basePdf['0'] || template.basePdf[0] || Object.values(template.basePdf)[0];
+                  console.log('[MULTI-PAGE] Extracted firstPdf from object');
+                } else {
+                  // String format (single PDF)
+                  firstPdf = template.basePdf;
+                  console.log('[MULTI-PAGE] Using firstPdf as-is (string)');
+                }
+
+                // Safety check: Ensure firstPdf is a string
+                if (typeof firstPdf !== 'string') {
+                  console.error('[MULTI-PAGE] ERROR: firstPdf is not a string!', typeof firstPdf);
+                  throw new Error('Failed to extract basePdf as string for page 0');
+                }
 
                 // Build object with '0', '1', etc keys for each page (PDFme v5 format)
                 basePdfForGenerator = {};
