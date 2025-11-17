@@ -600,10 +600,14 @@ app.post('/api/render', auth, async (req, res) => {
                 // Clone Page 2 schema fields for each continuation page
                 const continuationSchemas = secondPageSchema.map(field => {
                   if (field.type === 'multiVariableText') {
-                    return {
+                    // CRITICAL: Create clean copy without content field
+                    const cleanField = {
                       ...field,
                       name: `${fieldName}_page${i + 1}`
                     };
+                    // Remove content field to prevent JSON validation error
+                    delete cleanField.content;
+                    return cleanField;
                   }
                   return field;
                 });
@@ -649,8 +653,9 @@ app.post('/api/render', auth, async (req, res) => {
               }
 
               // Update template with new schemas
+              // CRITICAL: Use cleanedTemplate to preserve content field removal
               finalTemplate = {
-                ...template,
+                ...cleanedTemplate,
                 schemas: newSchemas,
                 basePdf: basePdfForGenerator
               };
@@ -671,8 +676,9 @@ app.post('/api/render', auth, async (req, res) => {
                 firstPdf = template.basePdf;
               }
 
+              // CRITICAL: Use cleanedTemplate to preserve content field removal
               finalTemplate = {
-                ...template,
+                ...cleanedTemplate,
                 basePdf: firstPdf, // CRITICAL: Single PDF string for single page
                 schemas: [firstPageSchema] // Only first page schema
               };
