@@ -231,16 +231,27 @@ function normalizeTextSpacing(str) {
  */
 async function paginateTextIntoChunks(text, firstLayout, continuationLayout) {
   const { PDFDocument, StandardFonts } = await import('pdf-lib');
-  const fontkit = (await import('fontkit')).default;
+  let fontkit;
+  try {
+    const fkMod = await import('fontkit');
+    fontkit = fkMod?.default || fkMod;
+  } catch (err) {
+    console.warn('[PAGINATE] fontkit not available, custom font measuring will fallback to Helvetica:', err?.message || err);
+  }
   const pdfDoc = await PDFDocument.create();
-  pdfDoc.registerFontkit(fontkit);
+  if (fontkit) {
+    pdfDoc.registerFontkit(fontkit);
+  }
 
   async function loadFont(fontData) {
-    if (fontData && fontData.data) {
+    if (fontData && fontData.data && fontkit) {
       const fontBytes = typeof fontData.data === 'string'
         ? await fetch(fontData.data).then(r => r.arrayBuffer())
         : fontData.data;
       return pdfDoc.embedFont(fontBytes);
+    }
+    if (fontData && fontData.data && !fontkit) {
+      console.warn('[PAGINATE] Custom font provided but fontkit missing - using Helvetica for measurement');
     }
     return pdfDoc.embedFont(StandardFonts.Helvetica);
   }
@@ -342,18 +353,23 @@ async function paginateTextIntoChunks(text, firstLayout, continuationLayout) {
 async function calculateTextCapacityWithRendering(text, widthMm, heightMm, fontSize = 11, lineHeight = 1.5, fontData = null, characterSpacing = 0) {
   try {
     const { PDFDocument, StandardFonts } = await import('pdf-lib');
-    const fontkit = (await import('fontkit')).default;
+    let fontkit;
+    try {
+      const fkMod = await import('fontkit');
+      fontkit = fkMod?.default || fkMod;
+    } catch (err) {
+      console.warn('[CAPACITY] fontkit not available, custom font measuring will fallback to Helvetica:', err?.message || err);
+    }
 
     // Create temporary PDF to measure text
     const pdfDoc = await PDFDocument.create();
 
     // Register fontkit for custom font support (CRITICAL for accurate measurements)
-    pdfDoc.registerFontkit(fontkit);
+    if (fontkit) pdfDoc.registerFontkit(fontkit);
 
     // Load font (use standard font or custom if provided)
     let font;
-    if (fontData && fontData.data) {
-      // Custom font provided
+    if (fontData && fontData.data && fontkit) {
       console.log('[CAPACITY] Loading custom font with fontkit support');
       const fontBytes = typeof fontData.data === 'string'
         ? await fetch(fontData.data).then(r => r.arrayBuffer())
@@ -361,8 +377,12 @@ async function calculateTextCapacityWithRendering(text, widthMm, heightMm, fontS
       font = await pdfDoc.embedFont(fontBytes);
       console.log('[CAPACITY] ✓ Custom font loaded successfully');
     } else {
-      // Use standard Helvetica as fallback
-      console.log('[CAPACITY] Using standard Helvetica font (no custom font)');
+      // Use standard Helvetica as fallback (and avoid throwing if fontkit missing)
+      if (fontData && fontData.data && !fontkit) {
+        console.warn('[CAPACITY] Custom font provided but fontkit missing - using Helvetica fallback');
+      } else {
+        console.log('[CAPACITY] Using standard Helvetica font (no custom font)');
+      }
       font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     }
 
