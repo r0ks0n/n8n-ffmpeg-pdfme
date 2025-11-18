@@ -226,6 +226,106 @@ function normalizeTextSpacing(str) {
   return normalized;
 }
 
+/**
+ * Render-accurate pagination: wrap text with actual font metrics and split into pages.
+ */
+async function paginateTextIntoChunks(text, firstLayout, continuationLayout) {
+  const { PDFDocument, StandardFonts } = await import('pdf-lib');
+  const fontkit = (await import('fontkit')).default;
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.registerFontkit(fontkit);
+
+  async function loadFont(fontData) {
+    if (fontData && fontData.data) {
+      const fontBytes = typeof fontData.data === 'string'
+        ? await fetch(fontData.data).then(r => r.arrayBuffer())
+        : fontData.data;
+      return pdfDoc.embedFont(fontBytes);
+    }
+    return pdfDoc.embedFont(StandardFonts.Helvetica);
+  }
+
+  const firstFont = await loadFont(firstLayout.fontData);
+  const contFont = await loadFont(continuationLayout.fontData || firstLayout.fontData);
+
+  function makeLayout(layout, font) {
+    const widthPt = (layout.width || 170) * 2.83465;
+    const heightPt = (layout.height || 200) * 2.83465;
+    const fontSize = layout.fontSize || layout.size || 11;
+    const lineHeight = layout.lineHeight || 1.5;
+    const characterSpacing = layout.characterSpacing || 0;
+    const lineHeightPt = fontSize * lineHeight;
+    const maxLines = Math.max(1, Math.floor(heightPt / lineHeightPt));
+    return { widthPt, heightPt, fontSize, lineHeightPt, maxLines, font, characterSpacing };
+  }
+
+  const first = makeLayout(firstLayout, firstFont);
+  const cont = makeLayout(continuationLayout, contFont);
+
+  const tokens = [];
+  const linesRaw = (text || '').split('\n');
+  linesRaw.forEach((line, idx) => {
+    const words = line.split(/\s+/).filter(Boolean);
+    if (words.length === 0) {
+      tokens.push({ type: 'newline' });
+    } else {
+      words.forEach((w, i) => tokens.push({ type: 'word', value: w }));
+      if (idx < linesRaw.length - 1) tokens.push({ type: 'newline' });
+    }
+  });
+
+  const chunks = [];
+  let active = first;
+  let currentLines = [];
+  let currentLine = '';
+
+  const flushLine = () => {
+    currentLines.push(currentLine);
+    currentLine = '';
+  };
+
+  const flushChunk = () => {
+    if (currentLine) flushLine();
+    if (currentLines.length) {
+      chunks.push(currentLines.join('\n'));
+      currentLines = [];
+    }
+    currentLine = '';
+    active = cont;
+  };
+
+  for (const token of tokens) {
+    if (token.type === 'newline') {
+      if (currentLine) flushLine();
+      else currentLines.push('');
+      if (currentLines.length >= active.maxLines) flushChunk();
+      continue;
+    }
+
+    const candidate = currentLine ? `${currentLine} ${token.value}` : token.value;
+    let testWidth = active.font.widthOfTextAtSize(candidate, active.fontSize);
+    if (active.characterSpacing) {
+      testWidth += candidate.length * active.characterSpacing;
+    }
+
+    if (testWidth > active.widthPt && currentLine) {
+      flushLine();
+      if (currentLines.length >= active.maxLines) {
+        flushChunk();
+      }
+      currentLine = token.value;
+    } else {
+      currentLine = candidate;
+    }
+  }
+
+  if (currentLine) flushLine();
+  if (currentLines.length) flushChunk();
+
+  if (chunks.length === 0) return [text || ''];
+  return chunks;
+}
+
 // ---- Multi-page text splitting helpers ----
 
 /**
@@ -731,31 +831,28 @@ app.post('/api/render', auth, async (req, res) => {
           if (fieldText && typeof fieldText === 'string') {
             console.log(`[MULTI-PAGE] Processing field "${fieldName}" with ${fieldText.length} characters`);
 
-            // Calculate text capacity using RENDER-BASED measurement (actual font metrics)
-            // This simulates PDFme's rendering to determine EXACTLY how much text fits
-            const firstPageCapacity = await calculateTextCapacityWithRendering(
-              fieldText, // Pass actual text for measurement
-              firstPageTextField.width || 170,
-              firstPageTextField.height || 180,
-              firstPageTextField.fontSize || firstPageTextField.size || 11, // Support both fontSize and size
-              firstPageTextField.lineHeight || 1.5,
-              customFonts[firstPageTextField.fontName] || null, // Pass custom font if available
-              firstPageTextField.characterSpacing || 0 // Pass character spacing
+            // Render-accurate pagination using actual font metrics and layouts for page1/page2+
+            textChunks = await paginateTextIntoChunks(
+              fieldText,
+              {
+                width: firstPageTextField.width || 170,
+                height: firstPageTextField.height || 180,
+                fontSize: firstPageTextField.fontSize || firstPageTextField.size || 11,
+                lineHeight: firstPageTextField.lineHeight || 1.5,
+                characterSpacing: firstPageTextField.characterSpacing || 0,
+                fontData: customFonts[firstPageTextField.fontName] || null
+              },
+              {
+                width: secondPageTextField.width || 170,
+                height: secondPageTextField.height || 260,
+                fontSize: secondPageTextField.fontSize || secondPageTextField.size || 11,
+                lineHeight: secondPageTextField.lineHeight || 1.5,
+                characterSpacing: secondPageTextField.characterSpacing || 0,
+                fontData: customFonts[secondPageTextField.fontName] || null
+              }
             );
 
-            const continuationCapacity = await calculateTextCapacityWithRendering(
-              fieldText, // Pass actual text for measurement
-              secondPageTextField.width || 170,
-              secondPageTextField.height || 260,
-              secondPageTextField.fontSize || secondPageTextField.size || 11, // Support both fontSize and size
-              secondPageTextField.lineHeight || 1.5,
-              customFonts[secondPageTextField.fontName] || null, // Pass custom font if available
-              secondPageTextField.characterSpacing || 0 // Pass character spacing
-            );
-
-            // Split text if it exceeds first page capacity
-            if (fieldText.length > firstPageCapacity) {
-              textChunks = splitTextIntelligently(fieldText, firstPageCapacity, continuationCapacity);
+            if (textChunks.length > 1) {
               console.log(`[MULTI-PAGE] Split text into ${textChunks.length} pages - will generate separate PDFs and merge`);
               generateMultiplePDFs = true;
             } else {
