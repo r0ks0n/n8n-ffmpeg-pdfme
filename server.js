@@ -207,8 +207,8 @@ function normalizeTextSpacing(str) {
     .split('\n')
     .map((line) => {
       let s = line;
-      // Remove spaces before punctuation within the line
-      s = s.replace(/[^\S\r\n]+([.,;:!?])/g, '$1');
+      // Remove spaces (incl. NBSP) before punctuation within the line
+      s = s.replace(/[\u00a0\s]+([.,;:!?])/g, '$1');
       // Ensure a single space after punctuation (if not end of line)
       s = s.replace(/([.,;:!?])([^\s])/g, '$1 $2');
       // Collapse multiple spaces in the line
@@ -217,8 +217,8 @@ function normalizeTextSpacing(str) {
     })
     .join('\n');
 
-  // Global cleanup: leftover spaces before punctuation across line joins
-  normalized = normalized.replace(/\s+([.,;:!?])/g, '$1');
+  // Global cleanup: leftover spaces (incl. NBSP) before punctuation across line joins
+  normalized = normalized.replace(/[\u00a0\s]+([.,;:!?])/g, '$1');
 
   // Squash 3+ blank lines to max 2 to avoid aggressive paragraph loss
   normalized = normalized.replace(/\n{3,}/g, '\n\n');
