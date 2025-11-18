@@ -198,16 +198,24 @@ function interpolateAll(obj, ctx) {
 }
 
 // Normalize spaces around punctuation to avoid leading .,!? on new lines
+// Preserve paragraph breaks: operate per line and keep \n intact
 function normalizeTextSpacing(str) {
   if (typeof str !== 'string') return str;
-  let s = str;
-  // Remove space(s) before punctuation
-  s = s.replace(/\s+([.,;:!?])/g, '$1');
-  // Ensure single space after punctuation (except end of string/line)
-  s = s.replace(/([.,;:!?])([^\s])/g, '$1 $2');
-  // Collapse multiple spaces
-  s = s.replace(/\s{2,}/g, ' ');
-  return s.trim();
+  return str
+    .split('\n')
+    .map((line) => {
+      let s = line;
+      // Remove spaces before punctuation within the line
+      s = s.replace(/[^\S\r\n]+([.,;:!?])/g, '$1');
+      // Ensure a single space after punctuation (if not end of line)
+      s = s.replace(/([.,;:!?])([^\s])/g, '$1 $2');
+      // Collapse multiple spaces in the line
+      s = s.replace(/\s{2,}/g, ' ');
+      return s.trimEnd();
+    })
+    .join('\n')
+    // Squash 3+ blank lines to max 2 to avoid aggressive paragraph loss
+    .replace(/\n{3,}/g, '\n\n');
 }
 
 // ---- Multi-page text splitting helpers ----
