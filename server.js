@@ -197,6 +197,19 @@ function interpolateAll(obj, ctx) {
   return obj;
 }
 
+// Normalize spaces around punctuation to avoid leading .,!? on new lines
+function normalizeTextSpacing(str) {
+  if (typeof str !== 'string') return str;
+  let s = str;
+  // Remove space(s) before punctuation
+  s = s.replace(/\s+([.,;:!?])/g, '$1');
+  // Ensure single space after punctuation (except end of string/line)
+  s = s.replace(/([.,;:!?])([^\s])/g, '$1 $2');
+  // Collapse multiple spaces
+  s = s.replace(/\s{2,}/g, ' ');
+  return s.trim();
+}
+
 // ---- Multi-page text splitting helpers ----
 
 /**
@@ -624,15 +637,16 @@ app.post('/api/render', auth, async (req, res) => {
             if (typeof content === 'string' && content.includes('{{')) {
               // Interpolate the content with context data
               const interpolatedValue = interpolateString(content, ctx);
-              pdfInputData[fieldName] = interpolatedValue;
+              pdfInputData[fieldName] = normalizeTextSpacing(interpolatedValue);
               console.log(`[RENDER] Field "${fieldName}": "${content}" -> "${interpolatedValue}"`);
             } else if (ctx[fieldName] !== undefined) {
               // Direct mapping: use value from context if it exists
-              pdfInputData[fieldName] = ctx[fieldName];
-              console.log(`[RENDER] Field "${fieldName}": direct mapping -> "${ctx[fieldName]}"`);
+              const mapped = ctx[fieldName];
+              pdfInputData[fieldName] = typeof mapped === 'string' ? normalizeTextSpacing(mapped) : mapped;
+              console.log(`[RENDER] Field "${fieldName}": direct mapping -> "${pdfInputData[fieldName]}"`);
             } else if (content && typeof content === 'string') {
               // If schema has content but no matching variable, use it directly
-              pdfInputData[fieldName] = content;
+              pdfInputData[fieldName] = normalizeTextSpacing(content);
               console.log(`[RENDER] Field "${fieldName}": using schema content directly`);
             }
           });
@@ -695,7 +709,8 @@ app.post('/api/render', auth, async (req, res) => {
 
         if (firstPageTextField && secondPageTextField) {
           const fieldName = firstPageTextField.name;
-          const fieldText = pdfInputData[fieldName];
+          const fieldText = normalizeTextSpacing(pdfInputData[fieldName]);
+          pdfInputData[fieldName] = fieldText; // Keep normalized for rendering and capacity calc
 
           if (fieldText && typeof fieldText === 'string') {
             console.log(`[MULTI-PAGE] Processing field "${fieldName}" with ${fieldText.length} characters`);
