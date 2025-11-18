@@ -201,7 +201,9 @@ function interpolateAll(obj, ctx) {
 // Preserve paragraph breaks: operate per line and keep \n intact
 function normalizeTextSpacing(str) {
   if (typeof str !== 'string') return str;
-  return str
+
+  // Preserve paragraph breaks: process line-by-line
+  let normalized = str
     .split('\n')
     .map((line) => {
       let s = line;
@@ -213,9 +215,15 @@ function normalizeTextSpacing(str) {
       s = s.replace(/\s{2,}/g, ' ');
       return s.trimEnd();
     })
-    .join('\n')
-    // Squash 3+ blank lines to max 2 to avoid aggressive paragraph loss
-    .replace(/\n{3,}/g, '\n\n');
+    .join('\n');
+
+  // Global cleanup: leftover spaces before punctuation across line joins
+  normalized = normalized.replace(/\s+([.,;:!?])/g, '$1');
+
+  // Squash 3+ blank lines to max 2 to avoid aggressive paragraph loss
+  normalized = normalized.replace(/\n{3,}/g, '\n\n');
+
+  return normalized;
 }
 
 // ---- Multi-page text splitting helpers ----
