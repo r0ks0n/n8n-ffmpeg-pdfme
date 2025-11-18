@@ -213,20 +213,27 @@ function interpolateAll(obj, ctx) {
 async function calculateTextCapacityWithRendering(text, widthMm, heightMm, fontSize = 11, lineHeight = 1.5, fontData = null, characterSpacing = 0) {
   try {
     const { PDFDocument, StandardFonts } = await import('pdf-lib');
+    const fontkit = (await import('fontkit')).default;
 
     // Create temporary PDF to measure text
     const pdfDoc = await PDFDocument.create();
+
+    // Register fontkit for custom font support (CRITICAL for accurate measurements)
+    pdfDoc.registerFontkit(fontkit);
 
     // Load font (use standard font or custom if provided)
     let font;
     if (fontData && fontData.data) {
       // Custom font provided
+      console.log('[CAPACITY] Loading custom font with fontkit support');
       const fontBytes = typeof fontData.data === 'string'
         ? await fetch(fontData.data).then(r => r.arrayBuffer())
         : fontData.data;
       font = await pdfDoc.embedFont(fontBytes);
+      console.log('[CAPACITY] ✓ Custom font loaded successfully');
     } else {
       // Use standard Helvetica as fallback
+      console.log('[CAPACITY] Using standard Helvetica font (no custom font)');
       font = await pdfDoc.embedFont(StandardFonts.Helvetica);
     }
 
@@ -322,15 +329,25 @@ async function calculateTextCapacityWithRendering(text, widthMm, heightMm, fontS
 function calculateTextCapacityEstimate(width, height, fontSize = 11, lineHeight = 1.5) {
   const widthPt = width * 2.83465;
   const heightPt = height * 2.83465;
-  const avgCharWidth = fontSize * 0.48;
-  const usableWidthPt = widthPt * 0.95;
-  const charsPerLine = Math.floor(usableWidthPt / avgCharWidth);
-  const lineHeightPt = fontSize * lineHeight;
-  const usableHeightPt = heightPt * 0.90;
-  const linesPerPage = Math.floor(usableHeightPt / lineHeightPt);
-  const capacity = Math.floor(charsPerLine * linesPerPage * 0.85);
 
-  console.log(`[ESTIMATED CAPACITY] ${width}mm×${height}mm → ${capacity} chars`);
+  // Less aggressive character width estimation (0.42 instead of 0.48)
+  // This allows MORE characters per line for better frame filling
+  const avgCharWidth = fontSize * 0.42;
+
+  // Use full width (removed 0.95 factor)
+  const usableWidthPt = widthPt;
+  const charsPerLine = Math.floor(usableWidthPt / avgCharWidth);
+
+  const lineHeightPt = fontSize * lineHeight;
+
+  // Use more of available height (0.95 instead of 0.90)
+  const usableHeightPt = heightPt * 0.95;
+  const linesPerPage = Math.floor(usableHeightPt / lineHeightPt);
+
+  // Less aggressive capacity reduction (0.92 instead of 0.85)
+  const capacity = Math.floor(charsPerLine * linesPerPage * 0.92);
+
+  console.log(`[ESTIMATED CAPACITY] ${width}mm×${height}mm → ${capacity} chars (fallback mode - less conservative)`);
   return capacity;
 }
 
