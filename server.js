@@ -22,9 +22,10 @@ const EDITOR_USERNAME = process.env.EDITOR_USERNAME || '';
 const EDITOR_PASSWORD = process.env.EDITOR_PASSWORD || '';
 
 app.use(cors({ origin: CORS_ORIGIN, credentials: false }));
-// Increased limits for PDF compose endpoint (multiple base64 PDFs can be large)
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Large limits for PDF compose endpoint (books with 50+ pages can exceed 100mb)
+// Base64 encoding increases size by ~33%, so 100mb PDF = 133mb payload
+app.use(express.json({ limit: '200mb' }));
+app.use(express.urlencoded({ limit: '200mb', extended: true }));
 
 // Session-based auth middleware for editor UI
 const sessionAuthMiddleware = (req, res, next) => {
