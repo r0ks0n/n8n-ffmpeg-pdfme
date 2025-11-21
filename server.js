@@ -1174,7 +1174,6 @@ app.post('/api/test-fetch', auth, async (req, res) => {
 // Compose - merge multiple PDFs into one
 app.post('/api/compose', auth, async (req, res) => {
   try {
-    await patchPdfLibFlateStream();
     const { pages, fileName } = req.body || {};
     if (!Array.isArray(pages) || pages.length === 0) {
       return res.status(400).json({ error: 'pages array is required' });
@@ -1182,24 +1181,9 @@ app.post('/api/compose', auth, async (req, res) => {
 
     console.log(`[Compose API] Composing ${pages.length} pages`);
 
-    const { PDFDocument } = await import('pdf-lib');
-    const mergedPdf = await PDFDocument.create();
-    mergedPdf.setProducer('pdfme-compose');
-    mergedPdf.setCreationDate(new Date());
-
-    const addPdfBuffer = async (pdfBuffer) => {
-      try {
-        const embeddedPages = await mergedPdf.embedPdf(pdfBuffer);
-        embeddedPages.forEach((embeddedPage, idx) => {
-          const { width, height } = embeddedPage.size();
-          const page = mergedPdf.addPage([width, height]);
-          page.drawPage(embeddedPage);
-        });
-        console.log(`[Compose API] Added ${embeddedPages.length} embedded page(s) from source PDF`);
-      } catch (error) {
-        console.error('[Compose API] Error embedding source PDF:', error.message);
-      }
-    };
+    // Use pdf-merger-js for robust merging (handles complex PDFs better than pdf-lib)
+    const PDFMerger = (await import('pdf-merger-js')).default;
+    const merger = new PDFMerger();
 
     // Collect all PDF bytes and add to merger
     for (let i = 0; i < pages.length; i++) {
@@ -1247,12 +1231,20 @@ app.post('/api/compose', auth, async (req, res) => {
         continue;
       }
 
+      // Add PDF to merger using pdf-merger-js
       if (pdfData) {
-        await addPdfBuffer(pdfData);
+        try {
+          await merger.add(pdfData);
+          console.log(`[Compose API] ✓ Added PDF ${i + 1} to merger`);
+        } catch (error) {
+          console.error(`[Compose API] ✗ Error adding PDF ${i + 1}:`, error.message);
+          // Continue with remaining PDFs
+        }
       }
     }
 
-    const pdfBytes = await mergedPdf.save();
+    // Save merged PDF as buffer
+    const pdfBytes = await merger.saveAsBuffer();
     console.log(`[Compose API] ✓ Merged PDF created: ${pdfBytes.length} bytes`);
 
     res.set('Content-Type', 'application/pdf');
