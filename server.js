@@ -6,9 +6,11 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { inflateRawSync, inflateSync } from 'zlib';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const require = createRequire(import.meta.url);
 
 dotenv.config();
 
@@ -172,7 +174,13 @@ const patchedFlateModules = new Set();
 async function applyFlatePatchForModule(modulePath) {
   if (patchedFlateModules.has(modulePath)) return true;
   try {
-    const flateModule = await import(modulePath);
+    let flateModule;
+    try {
+      flateModule = await import(modulePath);
+    } catch (esmErr) {
+      // fallback to CommonJS require
+      flateModule = require(modulePath);
+    }
     const FlateStream = flateModule?.default || flateModule;
     if (!FlateStream?.prototype?.readBlock) return false;
     const originalReadBlock = FlateStream.prototype.readBlock;
@@ -219,8 +227,7 @@ let flatePatched = false;
 async function patchPdfLibFlateStream() {
   if (flatePatched) return;
   const targets = [
-    'pdf-lib/cjs/core/streams/FlateStream.js',
-    'pdf-lib/es/core/streams/FlateStream.js'
+    'pdf-lib/cjs/core/streams/FlateStream.js'
   ];
   let success = false;
   for (const target of targets) {
