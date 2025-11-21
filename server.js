@@ -172,7 +172,8 @@ let flatePatched = false;
 async function patchPdfLibFlateStream() {
   if (flatePatched) return;
   try {
-    const { default: FlateStream } = await import('pdf-lib/cjs/core/streams/FlateStream.js');
+    const flateModule = await import('pdf-lib/cjs/core/streams/FlateStream.js');
+    const FlateStream = flateModule?.default || flateModule;
     const originalReadBlock = FlateStream.prototype.readBlock;
     FlateStream.prototype.readBlock = function patchedReadBlock() {
       if (this._zlibFallbackBuffer) {
