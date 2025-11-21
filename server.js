@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { Pool } from 'pg';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
+import { inflateRawSync } from 'zlib';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -166,6 +167,46 @@ function auth(req, res, next) {
   if (token && token === EDITOR_AUTH_TOKEN) return next();
   return res.status(401).json({ error: 'Unauthorized' });
 }
+
+let flatePatched = false;
+async function patchPdfLibFlateStream() {
+  if (flatePatched) return;
+  try {
+    const { default: FlateStream } = await import('pdf-lib/cjs/core/streams/FlateStream.js');
+    const originalReadBlock = FlateStream.prototype.readBlock;
+    FlateStream.prototype.readBlock = function patchedReadBlock() {
+      if (this._zlibFallbackBuffer) {
+        const buffer = this.ensureBuffer(this.bufferLength + this._zlibFallbackBuffer.length);
+        buffer.set(this._zlibFallbackBuffer, this.bufferLength);
+        this.bufferLength += this._zlibFallbackBuffer.length;
+        this._zlibFallbackBuffer = null;
+        this.eof = true;
+        return;
+      }
+      try {
+        return originalReadBlock.call(this);
+      } catch (err) {
+        try {
+          const remaining = this.stream.getBytes();
+          const inflated = inflateRawSync(Buffer.from(remaining));
+          this._zlibFallbackBuffer = new Uint8Array(inflated);
+          this.codeBuf = 0;
+          this.codeSize = 0;
+          this.readBlock();
+        } catch (fallbackErr) {
+          console.error('[FLATE PATCH] zlib fallback failed:', fallbackErr.message);
+          throw err;
+        }
+      }
+    };
+    flatePatched = true;
+    console.log('[FLATE PATCH] Applied zlib fallback for pdf-lib');
+  } catch (patchErr) {
+    console.warn('[FLATE PATCH] Could not patch pdf-lib FlateStream:', patchErr.message);
+  }
+}
+
+await patchPdfLibFlateStream();
 
 // ---- Variable interpolation helpers ----
 function getByPath(source, path) {
