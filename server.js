@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import { Pool } from 'pg';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { inflateRawSync } from 'zlib';
+import { inflateRawSync, inflateSync } from 'zlib';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -188,7 +188,12 @@ async function patchPdfLibFlateStream() {
       } catch (err) {
         try {
           const remaining = this.stream.getBytes();
-          const inflated = inflateRawSync(Buffer.from(remaining));
+          let inflated;
+          try {
+            inflated = inflateRawSync(Buffer.from(remaining));
+          } catch (rawErr) {
+            inflated = inflateSync(Buffer.from(remaining));
+          }
           this._zlibFallbackBuffer = new Uint8Array(inflated);
           this.codeBuf = 0;
           this.codeSize = 0;
