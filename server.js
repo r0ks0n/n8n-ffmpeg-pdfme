@@ -1112,12 +1112,15 @@ app.post('/api/compose', auth, async (req, res) => {
 
     const addPdfBuffer = async (pdfBuffer) => {
       try {
-        const srcDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-        const copiedPages = await mergedPdf.copyPages(srcDoc, srcDoc.getPageIndices());
-        copiedPages.forEach((page) => mergedPdf.addPage(page));
-        console.log(`[Compose API] Added ${copiedPages.length} page(s) from source PDF`);
+        const embeddedPages = await mergedPdf.embedPdf(pdfBuffer);
+        embeddedPages.forEach((embeddedPage, idx) => {
+          const { width, height } = embeddedPage.size();
+          const page = mergedPdf.addPage([width, height]);
+          page.drawPage(embeddedPage);
+        });
+        console.log(`[Compose API] Added ${embeddedPages.length} embedded page(s) from source PDF`);
       } catch (error) {
-        console.error('[Compose API] Error loading source PDF:', error.message);
+        console.error('[Compose API] Error embedding source PDF:', error.message);
       }
     };
 
