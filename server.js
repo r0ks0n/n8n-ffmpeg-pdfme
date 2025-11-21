@@ -1065,18 +1065,39 @@ app.post('/api/compose', auth, async (req, res) => {
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i];
 
-      // Extract PDF data from data URL
+      // Extract PDF data from data URL or HTTP URL
       let pdfData;
+
+      // Option 1: Data URL (base64 embedded)
       if (page.staticPdfDataUrl && page.staticPdfDataUrl.startsWith('data:')) {
-        // Extract base64 data from data URL
         const base64Data = page.staticPdfDataUrl.split(',')[1];
         if (!base64Data) {
           console.error(`[Compose API] Page ${i}: Invalid data URL format`);
           continue;
         }
         pdfData = Buffer.from(base64Data, 'base64');
-      } else {
-        console.error(`[Compose API] Page ${i}: Missing staticPdfDataUrl`);
+        console.log(`[Compose API] Page ${i}: Using data URL (${pdfData.length} bytes)`);
+      }
+      // Option 2: HTTP URL (fetch from remote)
+      else if (page.staticPdfUrl && (page.staticPdfUrl.startsWith('http://') || page.staticPdfUrl.startsWith('https://'))) {
+        try {
+          console.log(`[Compose API] Page ${i}: Fetching from URL: ${page.staticPdfUrl}`);
+          const response = await fetch(page.staticPdfUrl);
+          if (!response.ok) {
+            console.error(`[Compose API] Page ${i}: HTTP ${response.status} - ${response.statusText}`);
+            continue;
+          }
+          const arrayBuffer = await response.arrayBuffer();
+          pdfData = Buffer.from(arrayBuffer);
+          console.log(`[Compose API] Page ${i}: Fetched ${pdfData.length} bytes from URL`);
+        } catch (fetchError) {
+          console.error(`[Compose API] Page ${i}: Fetch failed:`, fetchError.message);
+          continue;
+        }
+      }
+      // Option 3: Neither provided
+      else {
+        console.error(`[Compose API] Page ${i}: Missing staticPdfDataUrl or staticPdfUrl`);
         continue;
       }
 
