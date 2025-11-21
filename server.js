@@ -229,6 +229,21 @@ function normalizeTextSpacing(str) {
   return normalized;
 }
 
+function normalizeStaticUrl(inputUrl) {
+  if (typeof inputUrl !== 'string') return inputUrl;
+  try {
+    const urlObj = new URL(inputUrl);
+    const segments = urlObj.pathname
+      .split('/')
+      .filter(Boolean)
+      .map(segment => encodeURIComponent(decodeURIComponent(segment)));
+    urlObj.pathname = '/' + segments.join('/');
+    return urlObj.toString();
+  } catch {
+    return inputUrl;
+  }
+}
+
 /**
  * Render-accurate pagination: wrap text with actual font metrics and split into pages.
  */
@@ -1114,8 +1129,14 @@ app.post('/api/compose', auth, async (req, res) => {
       // Option 2: HTTP URL (fetch from remote)
       else if (page.staticPdfUrl && (page.staticPdfUrl.startsWith('http://') || page.staticPdfUrl.startsWith('https://'))) {
         try {
-          console.log(`[Compose API] Page ${i}: Fetching from URL: ${page.staticPdfUrl}`);
-          const response = await fetch(page.staticPdfUrl);
+          const normalizedUrl = normalizeStaticUrl(page.staticPdfUrl);
+          console.log(`[Compose API] Page ${i}: Fetching from URL: ${normalizedUrl}`);
+          const response = await fetch(normalizedUrl, {
+            headers: {
+              'User-Agent': 'pdfme-compose/1.0',
+              'Accept': 'application/pdf,application/octet-stream;q=0.9,*/*;q=0.1'
+            }
+          });
           if (!response.ok) {
             console.error(`[Compose API] Page ${i}: HTTP ${response.status} - ${response.statusText}`);
             continue;
