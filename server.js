@@ -1060,7 +1060,9 @@ app.post('/api/compose', auth, async (req, res) => {
 
     // Use pdf-lib to merge PDFs
     const { PDFDocument } = await import('pdf-lib');
-    const mergedPdf = await PDFDocument.create();
+
+    // Collect all PDF bytes first
+    const pdfBuffers = [];
 
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i];
@@ -1101,13 +1103,39 @@ app.post('/api/compose', auth, async (req, res) => {
         continue;
       }
 
+      if (pdfData) {
+        pdfBuffers.push(pdfData);
+      }
+    }
+
+    // Create merged document
+    const mergedPdf = await PDFDocument.create();
+
+    // Load and merge each PDF with proper resource handling
+    for (let i = 0; i < pdfBuffers.length; i++) {
       try {
-        const sourcePdf = await PDFDocument.load(pdfData);
-        const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
-        copiedPages.forEach((page) => mergedPdf.addPage(page));
-        console.log(`[Compose API] Added page ${i + 1} (${copiedPages.length} pages from source)`);
+        const sourcePdf = await PDFDocument.load(pdfBuffers[i], {
+          ignoreEncryption: true,
+          updateMetadata: false,
+          throwOnInvalidObject: false
+        });
+
+        const pageCount = sourcePdf.getPageCount();
+        console.log(`[Compose API] Processing PDF ${i + 1}: ${pageCount} pages`);
+
+        // Copy all pages with embedded resources
+        const indices = Array.from({ length: pageCount }, (_, idx) => idx);
+        const copiedPages = await mergedPdf.copyPages(sourcePdf, indices);
+
+        // Add pages to merged document
+        copiedPages.forEach(page => {
+          mergedPdf.addPage(page);
+        });
+
+        console.log(`[Compose API] ✓ Successfully merged PDF ${i + 1} (${pageCount} pages)`);
       } catch (error) {
-        console.error(`[Compose API] Error loading page ${i}:`, error.message);
+        console.error(`[Compose API] ✗ Error merging PDF ${i + 1}:`, error.message);
+        console.error(`[Compose API] Stack:`, error.stack);
       }
     }
 
