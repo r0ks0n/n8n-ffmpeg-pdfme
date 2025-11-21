@@ -168,12 +168,13 @@ function auth(req, res, next) {
   return res.status(401).json({ error: 'Unauthorized' });
 }
 
-let flatePatched = false;
-async function patchPdfLibFlateStream() {
-  if (flatePatched) return;
+const patchedFlateModules = new Set();
+async function applyFlatePatchForModule(modulePath) {
+  if (patchedFlateModules.has(modulePath)) return true;
   try {
-    const flateModule = await import('pdf-lib/cjs/core/streams/FlateStream.js');
+    const flateModule = await import(modulePath);
     const FlateStream = flateModule?.default || flateModule;
+    if (!FlateStream?.prototype?.readBlock) return false;
     const originalReadBlock = FlateStream.prototype.readBlock;
     FlateStream.prototype.readBlock = function patchedReadBlock() {
       if (this._zlibFallbackBuffer) {
@@ -192,7 +193,7 @@ async function patchPdfLibFlateStream() {
           let inflated;
           try {
             inflated = inflateRawSync(Buffer.from(remaining));
-          } catch (rawErr) {
+          } catch {
             inflated = inflateSync(Buffer.from(remaining));
           }
           this._zlibFallbackBuffer = new Uint8Array(inflated);
@@ -200,15 +201,35 @@ async function patchPdfLibFlateStream() {
           this.codeSize = 0;
           this.readBlock();
         } catch (fallbackErr) {
-          console.error('[FLATE PATCH] zlib fallback failed:', fallbackErr.message);
+          console.error(`[FLATE PATCH] zlib fallback failed in ${modulePath}:`, fallbackErr.message);
           throw err;
         }
       }
     };
-    flatePatched = true;
-    console.log('[FLATE PATCH] Applied zlib fallback for pdf-lib');
+    patchedFlateModules.add(modulePath);
+    console.log(`[FLATE PATCH] Applied zlib fallback for ${modulePath}`);
+    return true;
   } catch (patchErr) {
-    console.warn('[FLATE PATCH] Could not patch pdf-lib FlateStream:', patchErr.message);
+    console.warn(`[FLATE PATCH] Could not patch ${modulePath}:`, patchErr.message);
+    return false;
+  }
+}
+
+let flatePatched = false;
+async function patchPdfLibFlateStream() {
+  if (flatePatched) return;
+  const targets = [
+    'pdf-lib/cjs/core/streams/FlateStream.js',
+    'pdf-lib/es/core/streams/FlateStream.js'
+  ];
+  let success = false;
+  for (const target of targets) {
+    const patched = await applyFlatePatchForModule(target);
+    success = success || patched;
+  }
+  flatePatched = success;
+  if (!success) {
+    console.warn('[FLATE PATCH] No pdf-lib streams were patched (library path may have changed).');
   }
 }
 
@@ -785,6 +806,7 @@ app.delete('/api/templates/:id', auth, async (req, res) => {
 // Render (server-side PDF generation without n8n)
 app.post('/api/render', auth, async (req, res) => {
   try {
+    await patchPdfLibFlateStream();
     const { template: tplFromBody, templateId, inputs, usePlugins, fileName } = req.body || {};
     if (!tplFromBody && !templateId) {
       return res.status(400).json({ error: 'Provide either template or templateId' });
@@ -1145,6 +1167,7 @@ app.post('/api/test-fetch', auth, async (req, res) => {
 // Compose - merge multiple PDFs into one
 app.post('/api/compose', auth, async (req, res) => {
   try {
+    await patchPdfLibFlateStream();
     const { pages, fileName } = req.body || {};
     if (!Array.isArray(pages) || pages.length === 0) {
       return res.status(400).json({ error: 'pages array is required' });
