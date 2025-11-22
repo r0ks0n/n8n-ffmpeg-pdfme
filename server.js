@@ -1292,8 +1292,12 @@ app.post('/api/compose', auth, async (req, res) => {
       }
     }
 
-    // Save merged PDF
-    const pdfBytes = await mergedPdf.save();
+    // Save merged PDF with options to avoid recompression issues
+    const pdfBytes = await mergedPdf.save({
+      useObjectStreams: false,  // Disable object streams (can cause issues)
+      addDefaultPage: false,     // Don't add default page
+      objectsPerTick: Infinity   // Process all objects at once
+    });
     console.log(`[Compose API] ✓ Merged PDF created: ${pdfBytes.length} bytes, ${mergedPdf.getPageCount()} pages`);
 
     res.set('Content-Type', 'application/pdf');
