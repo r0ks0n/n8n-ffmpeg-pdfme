@@ -1248,21 +1248,39 @@ app.post('/api/compose', auth, async (req, res) => {
 
           // embedPdf() creates form XObjects that preserve ALL content
           for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
-            const [embeddedPage] = await mergedPdf.embedPdf(sourcePdf, [pageIndex]);
-            const { width, height } = sourcePdf.getPage(pageIndex).getSize();
+            try {
+              const [embeddedPage] = await mergedPdf.embedPdf(sourcePdf, [pageIndex]);
+              const { width, height } = sourcePdf.getPage(pageIndex).getSize();
 
-            // Create new page with exact dimensions
-            const newPage = mergedPdf.addPage([width, height]);
+              // Create new page with exact dimensions
+              const newPage = mergedPdf.addPage([width, height]);
 
-            // Draw embedded page (this preserves content!)
-            newPage.drawPage(embeddedPage, {
-              x: 0,
-              y: 0,
-              width: width,
-              height: height
-            });
+              // Draw embedded page (this preserves content!)
+              newPage.drawPage(embeddedPage, {
+                x: 0,
+                y: 0,
+                width: width,
+                height: height
+              });
 
-            console.log(`[Compose API] Page ${i}.${pageIndex + 1}: Embedded ${width}x${height}pt`);
+              console.log(`[Compose API] Page ${i}.${pageIndex + 1}: Embedded ${width}x${height}pt`);
+            } catch (embedError) {
+              console.error(`[Compose API] ✗ Flate error on page ${i}.${pageIndex + 1}: ${embedError.message}`);
+              console.error(`[Compose API] Trying copyPages fallback for page ${i}.${pageIndex + 1}...`);
+
+              // Fallback: Try copyPages (may not preserve content but at least won't crash)
+              try {
+                const [copiedPage] = await mergedPdf.copyPages(sourcePdf, [pageIndex]);
+                mergedPdf.addPage(copiedPage);
+                console.log(`[Compose API] Page ${i}.${pageIndex + 1}: Used copyPages fallback`);
+              } catch (copyError) {
+                console.error(`[Compose API] ✗✗ Both embedPdf and copyPages failed for page ${i}.${pageIndex + 1}`);
+                // Add blank page as placeholder
+                const { width, height } = sourcePdf.getPage(pageIndex).getSize();
+                mergedPdf.addPage([width, height]);
+                console.log(`[Compose API] Page ${i}.${pageIndex + 1}: Added blank placeholder`);
+              }
+            }
           }
 
           console.log(`[Compose API] ✓ Added PDF ${i + 1} (${pageCount} pages)`);
