@@ -1171,7 +1171,9 @@ app.post('/api/test-fetch', auth, async (req, res) => {
   }
 });
 
-// Compose - merge multiple PDFs into one using muhammara (most reliable PDF merger)
+// Compose - merge multiple PDFs into one
+// CRITICAL FIX: Pass Uint8Array directly to pdf-merger-js, NOT Buffer
+// Issue #106: Buffer.from(arrayBuffer) loses data → blank pages
 app.post('/api/compose', auth, async (req, res) => {
   try {
     const { pages, fileName } = req.body || {};
@@ -1179,26 +1181,17 @@ app.post('/api/compose', auth, async (req, res) => {
       return res.status(400).json({ error: 'pages array is required' });
     }
 
-    console.log(`[Compose API] Composing ${pages.length} pages using muhammara`);
+    console.log(`[Compose API] Composing ${pages.length} pages`);
 
-    const muhammara = await import('muhammara');
-    const { writeFileSync, unlinkSync, readFileSync, mkdtempSync } = await import('fs');
-    const { join } = await import('path');
-    const { tmpdir } = await import('os');
-
-    // Create temporary directory for PDF files
-    const tempDir = mkdtempSync(join(tmpdir(), 'pdf-compose-'));
-    const outputPath = join(tempDir, 'merged.pdf');
-    const pdfWriter = muhammara.createWriter(outputPath);
-
-    let successfulMerges = 0;
+    const PDFMerger = (await import('pdf-merger-js')).default;
+    const merger = new PDFMerger();
 
     // Process each page
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i];
 
       // Extract PDF data from data URL or HTTP URL
-      let pdfBuffer;
+      let pdfData; // Will be Uint8Array
 
       // Option 1: Data URL (base64 embedded)
       if (page.staticPdfDataUrl && page.staticPdfDataUrl.startsWith('data:')) {
@@ -1207,8 +1200,14 @@ app.post('/api/compose', auth, async (req, res) => {
           console.error(`[Compose API] Page ${i}: Invalid data URL format`);
           continue;
         }
-        pdfBuffer = Buffer.from(base64Data, 'base64');
-        console.log(`[Compose API] Page ${i}: Using data URL (${pdfBuffer.length} bytes)`);
+        // Convert base64 to Uint8Array directly (NOT Buffer!)
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let j = 0; j < binaryString.length; j++) {
+          bytes[j] = binaryString.charCodeAt(j);
+        }
+        pdfData = bytes;
+        console.log(`[Compose API] Page ${i}: Using data URL (${pdfData.length} bytes as Uint8Array)`);
       }
       // Option 2: HTTP URL (fetch from remote)
       else if (page.staticPdfUrl && (page.staticPdfUrl.startsWith('http://') || page.staticPdfUrl.startsWith('https://'))) {
@@ -1225,9 +1224,13 @@ app.post('/api/compose', auth, async (req, res) => {
             console.error(`[Compose API] Page ${i}: HTTP ${response.status} - ${response.statusText}`);
             continue;
           }
+
+          // CRITICAL: Get ArrayBuffer, then convert to Uint8Array
+          // Do NOT use Buffer.from(arrayBuffer) - it loses data!
           const arrayBuffer = await response.arrayBuffer();
-          pdfBuffer = Buffer.from(arrayBuffer);
-          console.log(`[Compose API] Page ${i}: Fetched ${pdfBuffer.length} bytes from URL`);
+          pdfData = new Uint8Array(arrayBuffer);
+
+          console.log(`[Compose API] Page ${i}: Fetched ${pdfData.length} bytes as Uint8Array`);
         } catch (fetchError) {
           console.error(`[Compose API] Page ${i}: Fetch failed:`, fetchError.message);
           continue;
@@ -1239,48 +1242,27 @@ app.post('/api/compose', auth, async (req, res) => {
         continue;
       }
 
-      // Append PDF to merged document using muhammara
-      if (pdfBuffer) {
+      // Add PDF to merger using pdf-merger-js
+      // Pass Uint8Array directly - pdf-merger-js accepts it
+      if (pdfData) {
         try {
-          // Write PDF buffer to temporary file (muhammara works best with files)
-          const tempPdfPath = join(tempDir, `source-${i}.pdf`);
-          writeFileSync(tempPdfPath, pdfBuffer);
-
-          // Append all pages from source PDF to output
-          pdfWriter.appendPDFPagesFromPDF(tempPdfPath);
-
-          // Clean up temp source file
-          unlinkSync(tempPdfPath);
-
-          successfulMerges++;
-          console.log(`[Compose API] ✓ Appended PDF ${i + 1} to merged document`);
+          await merger.add(pdfData);
+          console.log(`[Compose API] ✓ Added PDF ${i + 1} to merger (Uint8Array: ${pdfData.length} bytes)`);
         } catch (error) {
-          console.error(`[Compose API] ✗ Error appending PDF ${i + 1}:`, error.message);
+          console.error(`[Compose API] ✗ Error adding PDF ${i + 1}:`, error.message);
           console.error('[Compose API] Stack:', error.stack);
           // Continue with remaining PDFs
         }
       }
     }
 
-    // Finalize merged PDF
-    pdfWriter.end();
-    console.log(`[Compose API] ✓ Merged ${successfulMerges}/${pages.length} PDFs successfully`);
-
-    // Read merged PDF and send response
-    const mergedPdfBuffer = readFileSync(outputPath);
-    console.log(`[Compose API] ✓ Final PDF size: ${mergedPdfBuffer.length} bytes`);
-
-    // Clean up temp directory
-    try {
-      unlinkSync(outputPath);
-      await import('fs').then(fs => fs.promises.rmdir(tempDir));
-    } catch (cleanupError) {
-      console.warn('[Compose API] Temp cleanup failed:', cleanupError.message);
-    }
+    // Save merged PDF as buffer
+    const pdfBytes = await merger.saveAsBuffer();
+    console.log(`[Compose API] ✓ Merged PDF created: ${pdfBytes.length} bytes`);
 
     res.set('Content-Type', 'application/pdf');
     res.set('Content-Disposition', `inline; filename="${fileName || 'document'}.pdf"`);
-    res.send(mergedPdfBuffer);
+    res.send(Buffer.from(pdfBytes));
   } catch (e) {
     console.error('[Compose API] Error:', e);
     res.status(500).json({
