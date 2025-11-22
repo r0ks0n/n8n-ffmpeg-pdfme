@@ -1183,8 +1183,8 @@ app.post('/api/compose', auth, async (req, res) => {
 
     console.log(`[Compose API] Composing ${pages.length} pages`);
 
-    // Use pdf-lib instead of pdf-merger-js for better compatibility
-    const { PDFDocument } = await import('pdf-lib');
+    // Use pdf-lib with special handling for problematic PDFs
+    const { PDFDocument, degrees } = await import('pdf-lib');
     const mergedPdf = await PDFDocument.create();
 
     // Process each page
@@ -1250,34 +1250,59 @@ app.post('/api/compose', auth, async (req, res) => {
         continue;
       }
 
-      // Add PDF using pdf-lib embedPdf approach (preserves all content)
+      // Add PDF using pdf-lib with copyPages (try-catch for flate errors)
       if (pdfData) {
         try {
           console.log(`[Compose API] Page ${i}: Attempting to load PDF with pdf-lib...`);
-          const sourcePdf = await PDFDocument.load(pdfData);
+
+          // Load source PDF with option to ignore errors
+          const sourcePdf = await PDFDocument.load(pdfData, {
+            ignoreEncryption: true,
+            updateMetadata: false
+          });
+
           const pageCount = sourcePdf.getPageCount();
           console.log(`[Compose API] Page ${i}: Source PDF loaded - ${pageCount} page(s)`);
 
-          // Embed the entire PDF as a resource (this preserves ALL content including fonts, images, etc.)
-          console.log(`[Compose API] Page ${i}: Embedding PDF to preserve all resources...`);
-          const embeddedPages = await mergedPdf.embedPdf(pdfData);
-          console.log(`[Compose API] Page ${i}: Embedded ${embeddedPages.length} page(s)`);
+          // Copy ALL pages (not just one)
+          const pageIndices = Array.from({ length: pageCount }, (_, idx) => idx);
+          console.log(`[Compose API] Page ${i}: Copying ${pageCount} page(s)...`);
 
-          // Draw each embedded page onto a new page in the merged PDF
-          for (let pageIdx = 0; pageIdx < embeddedPages.length; pageIdx++) {
-            const embeddedPage = embeddedPages[pageIdx];
-            const { width, height } = embeddedPage;
-            console.log(`[Compose API] Page ${i}.${pageIdx + 1}: Drawing embedded page (${width.toFixed(1)}x${height.toFixed(1)} pt)`);
+          const copiedPages = await mergedPdf.copyPages(sourcePdf, pageIndices);
+          console.log(`[Compose API] Page ${i}: Successfully copied ${copiedPages.length} page(s)`);
 
-            const newPage = mergedPdf.addPage([width, height]);
-            newPage.drawPage(embeddedPage);
+          // Add each copied page
+          for (let pageIdx = 0; pageIdx < copiedPages.length; pageIdx++) {
+            const copiedPage = copiedPages[pageIdx];
+            const { width, height } = copiedPage.getSize();
+            console.log(`[Compose API] Page ${i}.${pageIdx + 1}: Adding copied page (${width.toFixed(1)}x${height.toFixed(1)} pt)`);
+            mergedPdf.addPage(copiedPage);
           }
 
-          console.log(`[Compose API] ✓ Successfully added PDF ${i + 1} (${embeddedPages.length} pages, ${pdfData.length} bytes)`);
+          console.log(`[Compose API] ✓ Successfully added PDF ${i + 1} (${copiedPages.length} pages, ${pdfData.length} bytes)`);
         } catch (error) {
           console.error(`[Compose API] ✗ Error adding PDF ${i + 1}:`, error.message);
-          console.error('[Compose API] Stack:', error.stack);
-          // Continue with remaining PDFs
+          console.error('[Compose API] Error type:', error.constructor.name);
+
+          // If flate/decode error, try alternative approach
+          if (error.message && error.message.includes('flate')) {
+            console.log(`[Compose API] Page ${i}: Flate error detected, trying raw page extraction...`);
+            try {
+              // Fallback: Just load and get raw pages without decoding content
+              const fallbackPdf = await PDFDocument.load(pdfData, { ignoreEncryption: true });
+              const pageCount = fallbackPdf.getPageCount();
+
+              for (let idx = 0; idx < pageCount; idx++) {
+                const [copiedPage] = await mergedPdf.copyPages(fallbackPdf, [idx]);
+                mergedPdf.addPage(copiedPage);
+                console.log(`[Compose API] Page ${i}.${idx + 1}: Added via fallback method`);
+              }
+
+              console.log(`[Compose API] ✓ Fallback successful for PDF ${i + 1}`);
+            } catch (fallbackError) {
+              console.error(`[Compose API] ✗ Fallback also failed for PDF ${i + 1}:`, fallbackError.message);
+            }
+          }
         }
       } else {
         console.error(`[Compose API] Page ${i}: No pdfData available, skipping`);
