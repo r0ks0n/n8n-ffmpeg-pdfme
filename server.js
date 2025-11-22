@@ -1250,7 +1250,7 @@ app.post('/api/compose', auth, async (req, res) => {
         continue;
       }
 
-      // Add PDF using pdf-lib (more robust than pdf-merger-js)
+      // Add PDF using pdf-lib embedPdf approach (preserves all content)
       if (pdfData) {
         try {
           console.log(`[Compose API] Page ${i}: Attempting to load PDF with pdf-lib...`);
@@ -1258,18 +1258,22 @@ app.post('/api/compose', auth, async (req, res) => {
           const pageCount = sourcePdf.getPageCount();
           console.log(`[Compose API] Page ${i}: Source PDF loaded - ${pageCount} page(s)`);
 
-          // Copy all pages from source PDF
-          const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
-          console.log(`[Compose API] Page ${i}: Copied ${copiedPages.length} page(s)`);
+          // Embed the entire PDF as a resource (this preserves ALL content including fonts, images, etc.)
+          console.log(`[Compose API] Page ${i}: Embedding PDF to preserve all resources...`);
+          const embeddedPages = await mergedPdf.embedPdf(pdfData);
+          console.log(`[Compose API] Page ${i}: Embedded ${embeddedPages.length} page(s)`);
 
-          // Add each copied page to merged PDF
-          copiedPages.forEach((copiedPage, idx) => {
-            const { width, height } = copiedPage.getSize();
-            console.log(`[Compose API] Page ${i}.${idx + 1}: Adding page (${width.toFixed(1)}x${height.toFixed(1)} pt)`);
-            mergedPdf.addPage(copiedPage);
-          });
+          // Draw each embedded page onto a new page in the merged PDF
+          for (let pageIdx = 0; pageIdx < embeddedPages.length; pageIdx++) {
+            const embeddedPage = embeddedPages[pageIdx];
+            const { width, height } = embeddedPage;
+            console.log(`[Compose API] Page ${i}.${pageIdx + 1}: Drawing embedded page (${width.toFixed(1)}x${height.toFixed(1)} pt)`);
 
-          console.log(`[Compose API] ✓ Successfully added PDF ${i + 1} (${copiedPages.length} pages, ${pdfData.length} bytes)`);
+            const newPage = mergedPdf.addPage([width, height]);
+            newPage.drawPage(embeddedPage);
+          }
+
+          console.log(`[Compose API] ✓ Successfully added PDF ${i + 1} (${embeddedPages.length} pages, ${pdfData.length} bytes)`);
         } catch (error) {
           console.error(`[Compose API] ✗ Error adding PDF ${i + 1}:`, error.message);
           console.error('[Compose API] Stack:', error.stack);
