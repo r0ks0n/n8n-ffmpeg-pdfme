@@ -1250,40 +1250,38 @@ app.post('/api/compose', auth, async (req, res) => {
           const pageCount = sourcePdf.getPageCount();
           console.log(`[Compose API] Page ${i}: Source has ${pageCount} page(s)`);
 
-          // embedPdf() creates form XObjects that preserve ALL content
+          // CRITICAL: Use copyPages() FIRST (preserves content streams without decompression)
+          // embedPdf() tries to decompress/re-encode which causes Flate errors
           for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
             try {
-              // Try embedPdf first (best - preserves all content)
-              const [embeddedPage] = await mergedPdf.embedPdf(sourcePdf, [pageIndex]);
-              const { width, height } = sourcePdf.getPage(pageIndex).getSize();
+              // PRIMARY METHOD: copyPages (preserves content WITHOUT decompression)
+              console.log(`[Compose API] Copying page ${i}.${pageIndex + 1} with copyPages()...`);
+              const [copiedPage] = await mergedPdf.copyPages(sourcePdf, [pageIndex]);
+              mergedPdf.addPage(copiedPage);
+              const { width, height } = copiedPage.getSize();
+              console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Copied ${width}x${height}pt (content preserved)`);
+            } catch (copyError) {
+              console.error(`[Compose API] ✗ copyPages failed on page ${i}.${pageIndex + 1}: ${copyError.message}`);
 
-              // Create new page with exact dimensions
-              const newPage = mergedPdf.addPage([width, height]);
-
-              // Draw embedded page (this preserves content!)
-              newPage.drawPage(embeddedPage, {
-                x: 0,
-                y: 0,
-                width: width,
-                height: height
-              });
-
-              console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Embedded ${width}x${height}pt`);
-            } catch (embedError) {
-              console.error(`[Compose API] ✗ embedPdf failed on page ${i}.${pageIndex + 1}: ${embedError.message}`);
-
-              // CRITICAL: Try copyPages which SHOULD preserve content if source PDF is valid
+              // FALLBACK 1: Try embedPdf (may trigger Flate errors but worth trying)
               try {
-                console.log(`[Compose API] Trying copyPages for page ${i}.${pageIndex + 1}...`);
-                const [copiedPage] = await mergedPdf.copyPages(sourcePdf, [pageIndex]);
-                mergedPdf.addPage(copiedPage);
-                console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Used copyPages (content SHOULD be preserved)`);
-              } catch (copyError) {
-                console.error(`[Compose API] ✗✗ copyPages also failed for page ${i}.${pageIndex + 1}: ${copyError.message}`);
+                console.log(`[Compose API] Trying embedPdf fallback for page ${i}.${pageIndex + 1}...`);
+                const [embeddedPage] = await mergedPdf.embedPdf(sourcePdf, [pageIndex]);
+                const { width, height } = sourcePdf.getPage(pageIndex).getSize();
+                const newPage = mergedPdf.addPage([width, height]);
+                newPage.drawPage(embeddedPage, {
+                  x: 0,
+                  y: 0,
+                  width: width,
+                  height: height
+                });
+                console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Used embedPdf fallback`);
+              } catch (embedError) {
+                console.error(`[Compose API] ✗✗ embedPdf also failed for page ${i}.${pageIndex + 1}: ${embedError.message}`);
 
-                // Last resort: Try to reload PDF with throwOnInvalidObject: false
+                // FALLBACK 2: Try relaxed reload
                 try {
-                  console.log(`[Compose API] Trying relaxed PDF load for page ${i}.${pageIndex + 1}...`);
+                  console.log(`[Compose API] Trying relaxed PDF reload for page ${i}.${pageIndex + 1}...`);
                   const relaxedPdf = await PDFDocument.load(pdfData, {
                     ignoreEncryption: true,
                     updateMetadata: false,
@@ -1291,10 +1289,10 @@ app.post('/api/compose', auth, async (req, res) => {
                   });
                   const [relaxedPage] = await mergedPdf.copyPages(relaxedPdf, [pageIndex]);
                   mergedPdf.addPage(relaxedPage);
-                  console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Used relaxed load + copyPages`);
+                  console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Used relaxed reload + copyPages`);
                 } catch (relaxedError) {
                   console.error(`[Compose API] ✗✗✗ All methods failed for page ${i}.${pageIndex + 1}: ${relaxedError.message}`);
-                  // Add blank page as placeholder
+                  // Add blank page as last resort
                   const { width, height } = sourcePdf.getPage(pageIndex).getSize();
                   mergedPdf.addPage([width, height]);
                   console.log(`[Compose API] Page ${i}.${pageIndex + 1}: Added blank placeholder`);
@@ -1313,10 +1311,13 @@ app.post('/api/compose', auth, async (req, res) => {
     }
 
     // Save merged PDF with options to avoid recompression issues
+    // CRITICAL: Use updateFieldAppearances: false to skip content stream processing
+    console.log(`[Compose API] Saving merged PDF with ${mergedPdf.getPageCount()} pages...`);
     const pdfBytes = await mergedPdf.save({
-      useObjectStreams: false,  // Disable object streams (can cause issues)
-      addDefaultPage: false,     // Don't add default page
-      objectsPerTick: Infinity   // Process all objects at once
+      useObjectStreams: false,        // Disable object streams (can cause issues)
+      addDefaultPage: false,           // Don't add default page
+      objectsPerTick: Infinity,        // Process all objects at once
+      updateFieldAppearances: false    // CRITICAL: Skip form field processing (prevents Flate errors during save)
     });
     console.log(`[Compose API] ✓ Merged PDF created: ${pdfBytes.length} bytes, ${mergedPdf.getPageCount()} pages`);
 
