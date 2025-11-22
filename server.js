@@ -1183,15 +1183,16 @@ app.post('/api/compose', auth, async (req, res) => {
 
     console.log(`[Compose API] Composing ${pages.length} pages`);
 
-    const PDFMerger = (await import('pdf-merger-js')).default;
-    const merger = new PDFMerger();
+    // Use pdf-lib with embedPdf for FULL content preservation
+    const { PDFDocument } = await import('pdf-lib');
+    const mergedPdf = await PDFDocument.create();
 
     // Process each page
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i];
 
       // Extract PDF data from data URL or HTTP URL
-      let pdfData; // Will be Uint8Array
+      let pdfData;
 
       // Option 1: Data URL (base64 embedded)
       if (page.staticPdfDataUrl && page.staticPdfDataUrl.startsWith('data:')) {
@@ -1200,14 +1201,8 @@ app.post('/api/compose', auth, async (req, res) => {
           console.error(`[Compose API] Page ${i}: Invalid data URL format`);
           continue;
         }
-        // Convert base64 to Uint8Array directly (NOT Buffer!)
-        const binaryString = atob(base64Data);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let j = 0; j < binaryString.length; j++) {
-          bytes[j] = binaryString.charCodeAt(j);
-        }
-        pdfData = bytes;
-        console.log(`[Compose API] Page ${i}: Using data URL (${pdfData.length} bytes as Uint8Array)`);
+        pdfData = Buffer.from(base64Data, 'base64');
+        console.log(`[Compose API] Page ${i}: Using data URL (${pdfData.length} bytes)`);
       }
       // Option 2: HTTP URL (fetch from remote)
       else if (page.staticPdfUrl && (page.staticPdfUrl.startsWith('http://') || page.staticPdfUrl.startsWith('https://'))) {
@@ -1225,12 +1220,10 @@ app.post('/api/compose', auth, async (req, res) => {
             continue;
           }
 
-          // CRITICAL: Get ArrayBuffer, then convert to Uint8Array
-          // Do NOT use Buffer.from(arrayBuffer) - it loses data!
           const arrayBuffer = await response.arrayBuffer();
-          pdfData = new Uint8Array(arrayBuffer);
+          pdfData = Buffer.from(arrayBuffer);
 
-          console.log(`[Compose API] Page ${i}: Fetched ${pdfData.length} bytes as Uint8Array`);
+          console.log(`[Compose API] Page ${i}: Fetched ${pdfData.length} bytes`);
         } catch (fetchError) {
           console.error(`[Compose API] Page ${i}: Fetch failed:`, fetchError.message);
           continue;
@@ -1242,23 +1235,48 @@ app.post('/api/compose', auth, async (req, res) => {
         continue;
       }
 
-      // Add PDF to merger using pdf-merger-js
-      // Pass Uint8Array directly - pdf-merger-js accepts it
+      // CRITICAL: Use embedPdf() which preserves ALL content
       if (pdfData) {
         try {
-          await merger.add(pdfData);
-          console.log(`[Compose API] ✓ Added PDF ${i + 1} to merger (Uint8Array: ${pdfData.length} bytes)`);
+          console.log(`[Compose API] Page ${i}: Loading source PDF...`);
+          const sourcePdf = await PDFDocument.load(pdfData, {
+            ignoreEncryption: true,
+            updateMetadata: false
+          });
+          const pageCount = sourcePdf.getPageCount();
+          console.log(`[Compose API] Page ${i}: Source has ${pageCount} page(s)`);
+
+          // embedPdf() creates form XObjects that preserve ALL content
+          for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
+            const [embeddedPage] = await mergedPdf.embedPdf(sourcePdf, [pageIndex]);
+            const { width, height } = sourcePdf.getPage(pageIndex).getSize();
+
+            // Create new page with exact dimensions
+            const newPage = mergedPdf.addPage([width, height]);
+
+            // Draw embedded page (this preserves content!)
+            newPage.drawPage(embeddedPage, {
+              x: 0,
+              y: 0,
+              width: width,
+              height: height
+            });
+
+            console.log(`[Compose API] Page ${i}.${pageIndex + 1}: Embedded ${width}x${height}pt`);
+          }
+
+          console.log(`[Compose API] ✓ Added PDF ${i + 1} (${pageCount} pages)`);
         } catch (error) {
-          console.error(`[Compose API] ✗ Error adding PDF ${i + 1}:`, error.message);
+          console.error(`[Compose API] ✗ Error embedding PDF ${i + 1}:`, error.message);
           console.error('[Compose API] Stack:', error.stack);
           // Continue with remaining PDFs
         }
       }
     }
 
-    // Save merged PDF as buffer
-    const pdfBytes = await merger.saveAsBuffer();
-    console.log(`[Compose API] ✓ Merged PDF created: ${pdfBytes.length} bytes`);
+    // Save merged PDF
+    const pdfBytes = await mergedPdf.save();
+    console.log(`[Compose API] ✓ Merged PDF created: ${pdfBytes.length} bytes, ${mergedPdf.getPageCount()} pages`);
 
     res.set('Content-Type', 'application/pdf');
     res.set('Content-Disposition', `inline; filename="${fileName || 'document'}.pdf"`);
