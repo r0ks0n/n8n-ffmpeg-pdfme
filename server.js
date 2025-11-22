@@ -1238,10 +1238,14 @@ app.post('/api/compose', auth, async (req, res) => {
       // CRITICAL: Use embedPdf() which preserves ALL content
       if (pdfData) {
         try {
-          console.log(`[Compose API] Page ${i}: Loading source PDF...`);
+          console.log(`[Compose API] Page ${i}: Loading source PDF (${pdfData.length} bytes)...`);
+
+          // CRITICAL FIX: Use throwOnInvalidObject: false to skip corrupted/invalid objects
+          // This prevents Flate decompression errors from crashing the entire process
           const sourcePdf = await PDFDocument.load(pdfData, {
             ignoreEncryption: true,
-            updateMetadata: false
+            updateMetadata: false,
+            throwOnInvalidObject: false  // CRITICAL: Skip invalid objects instead of crashing
           });
           const pageCount = sourcePdf.getPageCount();
           console.log(`[Compose API] Page ${i}: Source has ${pageCount} page(s)`);
@@ -1249,6 +1253,7 @@ app.post('/api/compose', auth, async (req, res) => {
           // embedPdf() creates form XObjects that preserve ALL content
           for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
             try {
+              // Try embedPdf first (best - preserves all content)
               const [embeddedPage] = await mergedPdf.embedPdf(sourcePdf, [pageIndex]);
               const { width, height } = sourcePdf.getPage(pageIndex).getSize();
 
@@ -1263,22 +1268,37 @@ app.post('/api/compose', auth, async (req, res) => {
                 height: height
               });
 
-              console.log(`[Compose API] Page ${i}.${pageIndex + 1}: Embedded ${width}x${height}pt`);
+              console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Embedded ${width}x${height}pt`);
             } catch (embedError) {
-              console.error(`[Compose API] ✗ Flate error on page ${i}.${pageIndex + 1}: ${embedError.message}`);
-              console.error(`[Compose API] Trying copyPages fallback for page ${i}.${pageIndex + 1}...`);
+              console.error(`[Compose API] ✗ embedPdf failed on page ${i}.${pageIndex + 1}: ${embedError.message}`);
 
-              // Fallback: Try copyPages (may not preserve content but at least won't crash)
+              // CRITICAL: Try copyPages which SHOULD preserve content if source PDF is valid
               try {
+                console.log(`[Compose API] Trying copyPages for page ${i}.${pageIndex + 1}...`);
                 const [copiedPage] = await mergedPdf.copyPages(sourcePdf, [pageIndex]);
                 mergedPdf.addPage(copiedPage);
-                console.log(`[Compose API] Page ${i}.${pageIndex + 1}: Used copyPages fallback`);
+                console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Used copyPages (content SHOULD be preserved)`);
               } catch (copyError) {
-                console.error(`[Compose API] ✗✗ Both embedPdf and copyPages failed for page ${i}.${pageIndex + 1}`);
-                // Add blank page as placeholder
-                const { width, height } = sourcePdf.getPage(pageIndex).getSize();
-                mergedPdf.addPage([width, height]);
-                console.log(`[Compose API] Page ${i}.${pageIndex + 1}: Added blank placeholder`);
+                console.error(`[Compose API] ✗✗ copyPages also failed for page ${i}.${pageIndex + 1}: ${copyError.message}`);
+
+                // Last resort: Try to reload PDF with throwOnInvalidObject: false
+                try {
+                  console.log(`[Compose API] Trying relaxed PDF load for page ${i}.${pageIndex + 1}...`);
+                  const relaxedPdf = await PDFDocument.load(pdfData, {
+                    ignoreEncryption: true,
+                    updateMetadata: false,
+                    throwOnInvalidObject: false
+                  });
+                  const [relaxedPage] = await mergedPdf.copyPages(relaxedPdf, [pageIndex]);
+                  mergedPdf.addPage(relaxedPage);
+                  console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Used relaxed load + copyPages`);
+                } catch (relaxedError) {
+                  console.error(`[Compose API] ✗✗✗ All methods failed for page ${i}.${pageIndex + 1}: ${relaxedError.message}`);
+                  // Add blank page as placeholder
+                  const { width, height } = sourcePdf.getPage(pageIndex).getSize();
+                  mergedPdf.addPage([width, height]);
+                  console.log(`[Compose API] Page ${i}.${pageIndex + 1}: Added blank placeholder`);
+                }
               }
             }
           }
