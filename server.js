@@ -1183,9 +1183,9 @@ app.post('/api/compose', auth, async (req, res) => {
 
     console.log(`[Compose API] Composing ${pages.length} pages`);
 
-    // Use pdf-lib with embedPdf for FULL content preservation
-    const { PDFDocument } = await import('pdf-lib');
-    const mergedPdf = await PDFDocument.create();
+    // NUCLEAR OPTION: Use pdf-merger-js which works at binary level (no decompression)
+    const PDFMerger = (await import('pdf-merger-js')).default;
+    const merger = new PDFMerger();
 
     // Process each page
     for (let i = 0; i < pages.length; i++) {
@@ -1221,7 +1221,8 @@ app.post('/api/compose', auth, async (req, res) => {
           }
 
           const arrayBuffer = await response.arrayBuffer();
-          pdfData = Buffer.from(arrayBuffer);
+          // CRITICAL: Use Uint8Array directly (NOT Buffer) - Issue #106
+          pdfData = new Uint8Array(arrayBuffer);
 
           console.log(`[Compose API] Page ${i}: Fetched ${pdfData.length} bytes`);
         } catch (fetchError) {
@@ -1235,95 +1236,32 @@ app.post('/api/compose', auth, async (req, res) => {
         continue;
       }
 
-      // CRITICAL: Use embedPdf() which preserves ALL content
+      // CRITICAL: Pass Uint8Array directly to pdf-merger-js (preserves ALL bytes)
       if (pdfData) {
         try {
-          console.log(`[Compose API] Page ${i}: Loading source PDF (${pdfData.length} bytes)...`);
+          console.log(`[Compose API] Page ${i}: Adding PDF to merger (${pdfData.length} bytes)...`);
 
-          // CRITICAL FIX: Use throwOnInvalidObject: false to skip corrupted/invalid objects
-          // This prevents Flate decompression errors from crashing the entire process
-          const sourcePdf = await PDFDocument.load(pdfData, {
-            ignoreEncryption: true,
-            updateMetadata: false,
-            throwOnInvalidObject: false  // CRITICAL: Skip invalid objects instead of crashing
-          });
-          const pageCount = sourcePdf.getPageCount();
-          console.log(`[Compose API] Page ${i}: Source has ${pageCount} page(s)`);
+          // CRITICAL: Convert Buffer to Uint8Array if needed
+          const uint8Data = pdfData instanceof Buffer ? new Uint8Array(pdfData) : pdfData;
 
-          // CRITICAL: Use copyPages() FIRST (preserves content streams without decompression)
-          // embedPdf() tries to decompress/re-encode which causes Flate errors
-          for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
-            try {
-              // PRIMARY METHOD: copyPages (preserves content WITHOUT decompression)
-              console.log(`[Compose API] Copying page ${i}.${pageIndex + 1} with copyPages()...`);
-              const [copiedPage] = await mergedPdf.copyPages(sourcePdf, [pageIndex]);
-              mergedPdf.addPage(copiedPage);
-              const { width, height } = copiedPage.getSize();
-              console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Copied ${width}x${height}pt (content preserved)`);
-            } catch (copyError) {
-              console.error(`[Compose API] ✗ copyPages failed on page ${i}.${pageIndex + 1}: ${copyError.message}`);
-
-              // FALLBACK 1: Try embedPdf (may trigger Flate errors but worth trying)
-              try {
-                console.log(`[Compose API] Trying embedPdf fallback for page ${i}.${pageIndex + 1}...`);
-                const [embeddedPage] = await mergedPdf.embedPdf(sourcePdf, [pageIndex]);
-                const { width, height } = sourcePdf.getPage(pageIndex).getSize();
-                const newPage = mergedPdf.addPage([width, height]);
-                newPage.drawPage(embeddedPage, {
-                  x: 0,
-                  y: 0,
-                  width: width,
-                  height: height
-                });
-                console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Used embedPdf fallback`);
-              } catch (embedError) {
-                console.error(`[Compose API] ✗✗ embedPdf also failed for page ${i}.${pageIndex + 1}: ${embedError.message}`);
-
-                // FALLBACK 2: Try relaxed reload
-                try {
-                  console.log(`[Compose API] Trying relaxed PDF reload for page ${i}.${pageIndex + 1}...`);
-                  const relaxedPdf = await PDFDocument.load(pdfData, {
-                    ignoreEncryption: true,
-                    updateMetadata: false,
-                    throwOnInvalidObject: false
-                  });
-                  const [relaxedPage] = await mergedPdf.copyPages(relaxedPdf, [pageIndex]);
-                  mergedPdf.addPage(relaxedPage);
-                  console.log(`[Compose API] Page ${i}.${pageIndex + 1}: ✓ Used relaxed reload + copyPages`);
-                } catch (relaxedError) {
-                  console.error(`[Compose API] ✗✗✗ All methods failed for page ${i}.${pageIndex + 1}: ${relaxedError.message}`);
-                  // Add blank page as last resort
-                  const { width, height } = sourcePdf.getPage(pageIndex).getSize();
-                  mergedPdf.addPage([width, height]);
-                  console.log(`[Compose API] Page ${i}.${pageIndex + 1}: Added blank placeholder`);
-                }
-              }
-            }
-          }
-
-          console.log(`[Compose API] ✓ Added PDF ${i + 1} (${pageCount} pages)`);
+          await merger.add(uint8Data);
+          console.log(`[Compose API] Page ${i}: ✓ Added to merger`);
         } catch (error) {
-          console.error(`[Compose API] ✗ Error embedding PDF ${i + 1}:`, error.message);
+          console.error(`[Compose API] ✗ Error adding PDF ${i + 1}:`, error.message);
           console.error('[Compose API] Stack:', error.stack);
           // Continue with remaining PDFs
         }
       }
     }
 
-    // Save merged PDF with options to avoid recompression issues
-    // CRITICAL: Use updateFieldAppearances: false to skip content stream processing
-    console.log(`[Compose API] Saving merged PDF with ${mergedPdf.getPageCount()} pages...`);
-    const pdfBytes = await mergedPdf.save({
-      useObjectStreams: false,        // Disable object streams (can cause issues)
-      addDefaultPage: false,           // Don't add default page
-      objectsPerTick: Infinity,        // Process all objects at once
-      updateFieldAppearances: false    // CRITICAL: Skip form field processing (prevents Flate errors during save)
-    });
-    console.log(`[Compose API] ✓ Merged PDF created: ${pdfBytes.length} bytes, ${mergedPdf.getPageCount()} pages`);
+    // Save merged PDF
+    console.log(`[Compose API] Saving merged PDF...`);
+    const mergedPdfBuffer = await merger.saveAsBuffer();
+    console.log(`[Compose API] ✓ Merged PDF created: ${mergedPdfBuffer.length} bytes`);
 
     res.set('Content-Type', 'application/pdf');
     res.set('Content-Disposition', `inline; filename="${fileName || 'document'}.pdf"`);
-    res.send(Buffer.from(pdfBytes));
+    res.send(mergedPdfBuffer);
   } catch (e) {
     console.error('[Compose API] Error:', e);
     res.status(500).json({
