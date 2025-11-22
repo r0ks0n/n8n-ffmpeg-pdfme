@@ -1189,17 +1189,22 @@ app.post('/api/compose', auth, async (req, res) => {
     // Process each page
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i];
+      console.log(`[Compose API] ==================== Processing page ${i + 1}/${pages.length} ====================`);
+      console.log(`[Compose API] Page ${i} object keys:`, Object.keys(page));
 
       // Extract PDF data from data URL or HTTP URL
       let pdfData; // Will be Uint8Array
 
       // Option 1: Data URL (base64 embedded)
       if (page.staticPdfDataUrl && page.staticPdfDataUrl.startsWith('data:')) {
+        console.log(`[Compose API] Page ${i}: Has staticPdfDataUrl (data URL)`);
         const base64Data = page.staticPdfDataUrl.split(',')[1];
         if (!base64Data) {
-          console.error(`[Compose API] Page ${i}: Invalid data URL format`);
+          console.error(`[Compose API] Page ${i}: Invalid data URL format - no base64 data after comma`);
           continue;
         }
+        console.log(`[Compose API] Page ${i}: Base64 data length: ${base64Data.length} characters`);
+
         // Convert base64 to Uint8Array directly (NOT Buffer!)
         const binaryString = atob(base64Data);
         const bytes = new Uint8Array(binaryString.length);
@@ -1207,7 +1212,9 @@ app.post('/api/compose', auth, async (req, res) => {
           bytes[j] = binaryString.charCodeAt(j);
         }
         pdfData = bytes;
-        console.log(`[Compose API] Page ${i}: Using data URL (${pdfData.length} bytes as Uint8Array)`);
+        console.log(`[Compose API] Page ${i}: Converted to Uint8Array: ${pdfData.length} bytes`);
+        console.log(`[Compose API] Page ${i}: First 20 bytes (hex): ${Array.from(pdfData.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join('')}`);
+        console.log(`[Compose API] Page ${i}: First 10 bytes (ascii): ${String.fromCharCode(...pdfData.slice(0, 10))}`);
       }
       // Option 2: HTTP URL (fetch from remote)
       else if (page.staticPdfUrl && (page.staticPdfUrl.startsWith('http://') || page.staticPdfUrl.startsWith('https://'))) {
@@ -1246,19 +1253,24 @@ app.post('/api/compose', auth, async (req, res) => {
       // Pass Uint8Array directly - pdf-merger-js accepts it
       if (pdfData) {
         try {
+          console.log(`[Compose API] Page ${i}: Attempting to add to merger...`);
           await merger.add(pdfData);
-          console.log(`[Compose API] ✓ Added PDF ${i + 1} to merger (Uint8Array: ${pdfData.length} bytes)`);
+          console.log(`[Compose API] ✓ Successfully added PDF ${i + 1} to merger (Uint8Array: ${pdfData.length} bytes)`);
         } catch (error) {
           console.error(`[Compose API] ✗ Error adding PDF ${i + 1}:`, error.message);
           console.error('[Compose API] Stack:', error.stack);
           // Continue with remaining PDFs
         }
+      } else {
+        console.error(`[Compose API] Page ${i}: No pdfData available, skipping`);
       }
     }
 
+    console.log(`[Compose API] ==================== Starting merge operation ====================`);
     // Save merged PDF as buffer
     const pdfBytes = await merger.saveAsBuffer();
-    console.log(`[Compose API] ✓ Merged PDF created: ${pdfBytes.length} bytes`);
+    console.log(`[Compose API] ✓✓✓ Merged PDF created successfully: ${pdfBytes.length} bytes ✓✓✓`);
+    console.log(`[Compose API] First 20 bytes of merged PDF (hex): ${Array.from(pdfBytes.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join('')}`);
 
     res.set('Content-Type', 'application/pdf');
     res.set('Content-Disposition', `inline; filename="${fileName || 'document'}.pdf"`);
