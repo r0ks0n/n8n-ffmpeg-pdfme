@@ -1215,9 +1215,6 @@ app.post('/api/compose', auth, async (req, res) => {
 
     console.log(`[Compose API] Composing ${pages.length} pages`);
 
-    // CRITICAL FIX: Load first PDF and append others (like LogRocket article)
-    const { PDFDocument } = await import('pdf-lib');
-    let mergedPdf = null;
     const allPdfData = [];
 
     // First, collect all PDF data
@@ -1280,37 +1277,23 @@ app.post('/api/compose', auth, async (req, res) => {
       return res.status(400).json({ error: 'No valid PDF data found' });
     }
 
-    // CRITICAL: Load FIRST PDF as base (like LogRocket article)
-    console.log(`[Compose API] Loading first PDF as base...`);
-    mergedPdf = await PDFDocument.load(allPdfData[0].data, {
-      ignoreEncryption: true,
-      updateMetadata: false,
-      throwOnInvalidObject: false
-    });
-    console.log(`[Compose API] ✓ Base PDF loaded with ${mergedPdf.getPageCount()} pages`);
+    // CRITICAL FIX: Use pdf-merger-js (binary-level, preserves fonts)
+    // pdf-lib copyPages() renames fonts → breaks content stream references
+    console.log(`[Compose API] Using pdf-merger-js for binary-level merge...`);
+    const PDFMerger = (await import('pdf-merger-js')).default;
+    const merger = new PDFMerger();
 
-    // Append remaining PDFs
-    for (let i = 1; i < allPdfData.length; i++) {
+    // Add all PDFs to merger
+    for (let i = 0; i < allPdfData.length; i++) {
       const { index, data } = allPdfData[i];
       try {
-        console.log(`[Compose API] Loading PDF ${i + 1}/${allPdfData.length} (${data.length} bytes)...`);
+        console.log(`[Compose API] Adding PDF ${i + 1}/${allPdfData.length} (${data.length} bytes)...`);
 
-        const sourcePdf = await PDFDocument.load(data, {
-          ignoreEncryption: true,
-          updateMetadata: false,
-          throwOnInvalidObject: false
-        });
+        // CRITICAL: Ensure Uint8Array (not Buffer)
+        const uint8Data = data instanceof Buffer ? new Uint8Array(data) : data;
 
-        // Copy ALL pages at once (like LogRocket article)
-        console.log(`[Compose API] Copying ${sourcePdf.getPageCount()} pages from PDF ${i + 1}...`);
-        const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
-
-        // Add all copied pages
-        for (const page of copiedPages) {
-          mergedPdf.addPage(page);
-        }
-
-        console.log(`[Compose API] ✓ Added ${copiedPages.length} pages from PDF ${i + 1}`);
+        await merger.add(uint8Data);
+        console.log(`[Compose API] ✓ Added PDF ${i + 1}`);
       } catch (error) {
         console.error(`[Compose API] ✗ Error adding PDF ${index}:`, error.message);
         console.error('[Compose API] Stack:', error.stack);
@@ -1319,18 +1302,13 @@ app.post('/api/compose', auth, async (req, res) => {
     }
 
     // Save merged PDF
-    console.log(`[Compose API] Saving merged PDF with ${mergedPdf.getPageCount()} pages...`);
-    const pdfBytes = await mergedPdf.save({
-      useObjectStreams: false,
-      addDefaultPage: false,
-      objectsPerTick: Infinity,
-      updateFieldAppearances: false
-    });
-    console.log(`[Compose API] ✓ Merged PDF created: ${pdfBytes.length} bytes`);
+    console.log(`[Compose API] Saving merged PDF...`);
+    const mergedPdfBuffer = await merger.saveAsBuffer();
+    console.log(`[Compose API] ✓ Merged PDF created: ${mergedPdfBuffer.length} bytes`);
 
     res.set('Content-Type', 'application/pdf');
     res.set('Content-Disposition', `inline; filename="${fileName || 'document'}.pdf"`);
-    res.send(Buffer.from(pdfBytes));
+    res.send(mergedPdfBuffer);
   } catch (e) {
     console.error('[Compose API] Error:', e);
     res.status(500).json({
