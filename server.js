@@ -1239,24 +1239,32 @@ app.post('/api/compose', auth, async (req, res) => {
         try {
           const normalizedUrl = normalizeStaticUrl(page.staticPdfUrl);
           console.log(`[Compose API] Page ${i}: Fetching from URL: ${normalizedUrl}`);
+
+          // Build headers: merge custom auth headers with default headers
+          const fetchHeaders = {
+            'User-Agent': 'pdfme-compose/1.0',
+            'Accept': 'application/pdf,application/octet-stream;q=0.9,*/*;q=0.1',
+            ...page.staticPdfHeaders  // Add custom auth headers (Authorization, custom headers, etc.)
+          };
+
+          console.log(`[Compose API] Page ${i}: Using headers:`, Object.keys(fetchHeaders).join(', '));
+
           const response = await fetch(normalizedUrl, {
-            headers: {
-              'User-Agent': 'pdfme-compose/1.0',
-              'Accept': 'application/pdf,application/octet-stream;q=0.9,*/*;q=0.1'
-            }
+            headers: fetchHeaders
           });
+
           if (!response.ok) {
             console.error(`[Compose API] Page ${i}: HTTP ${response.status} - ${response.statusText}`);
             continue;
           }
 
           const arrayBuffer = await response.arrayBuffer();
-          // CRITICAL: Use Uint8Array directly (NOT Buffer) - Issue #106
+          // CRITICAL: Use Uint8Array directly (NOT Buffer) - preserves binary data
           pdfData = new Uint8Array(arrayBuffer);
 
-          console.log(`[Compose API] Page ${i}: Fetched ${pdfData.length} bytes`);
+          console.log(`[Compose API] Page ${i}: ✓ Fetched ${pdfData.length} bytes`);
         } catch (fetchError) {
-          console.error(`[Compose API] Page ${i}: Fetch failed:`, fetchError.message);
+          console.error(`[Compose API] Page ${i}: ✗ Fetch failed:`, fetchError.message);
           continue;
         }
       }
