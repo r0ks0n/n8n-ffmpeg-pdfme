@@ -1139,15 +1139,15 @@ app.post('/api/preview', auth, async (req, res) => {
   }
 });
 
-// Test endpoint - fetch and return single static PDF (for debugging)
-app.post('/api/test-fetch', auth, async (req, res) => {
+// Test endpoint - fetch and self-merge PDF (for debugging copyPages)
+app.post('/api/test-merge', auth, async (req, res) => {
   try {
     const { url } = req.body || {};
     if (!url) {
       return res.status(400).json({ error: 'url is required' });
     }
 
-    console.log(`[Test Fetch] Fetching PDF from: ${url}`);
+    console.log(`[Test Merge] Fetching PDF from: ${url}`);
     const response = await fetch(url);
     if (!response.ok) {
       return res.status(response.status).json({
@@ -1156,17 +1156,49 @@ app.post('/api/test-fetch', auth, async (req, res) => {
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    const pdfData = Buffer.from(arrayBuffer);
-    console.log(`[Test Fetch] Fetched ${pdfData.length} bytes`);
+    const pdfData = new Uint8Array(arrayBuffer);
+    console.log(`[Test Merge] Fetched ${pdfData.length} bytes`);
+
+    // Load PDF with pdf-lib
+    const { PDFDocument } = await import('pdf-lib');
+    const pdf = await PDFDocument.load(pdfData, {
+      ignoreEncryption: true,
+      updateMetadata: false,
+      throwOnInvalidObject: false
+    });
+
+    console.log(`[Test Merge] Loaded PDF with ${pdf.getPageCount()} pages`);
+
+    // Try to copy to itself (like LogRocket)
+    const copiedPages = await pdf.copyPages(pdf, pdf.getPageIndices());
+    console.log(`[Test Merge] Copied ${copiedPages.length} pages`);
+
+    for (const page of copiedPages) {
+      pdf.addPage(page);
+    }
+
+    console.log(`[Test Merge] After adding: ${pdf.getPageCount()} pages`);
+
+    // Save
+    const pdfBytes = await pdf.save({
+      useObjectStreams: false,
+      addDefaultPage: false,
+      objectsPerTick: Infinity,
+      updateFieldAppearances: false
+    });
+
+    console.log(`[Test Merge] Saved ${pdfBytes.length} bytes`);
 
     res.set('Content-Type', 'application/pdf');
-    res.set('Content-Disposition', 'inline; filename="test.pdf"');
-    res.send(pdfData);
+    res.set('Content-Disposition', 'inline; filename="test-merged.pdf"');
+    res.send(Buffer.from(pdfBytes));
   } catch (e) {
-    console.error('[Test Fetch] Error:', e);
+    console.error('[Test Merge] Error:', e);
+    console.error('[Test Merge] Stack:', e.stack);
     res.status(500).json({
-      error: 'fetch error',
-      message: e.message
+      error: 'merge error',
+      message: e.message,
+      details: e.toString()
     });
   }
 });
