@@ -308,13 +308,31 @@ function normalizeStaticUrl(inputUrl) {
   if (typeof inputUrl !== 'string') return inputUrl;
   try {
     const urlObj = new URL(inputUrl);
+
+    // Special handling for Backblaze B2/S3 URLs - don't re-encode already encoded paths
+    const isBackblaze = urlObj.hostname.includes('backblaze') ||
+                       urlObj.hostname.includes('b2') ||
+                       urlObj.hostname.includes('s3');
+
+    if (isBackblaze) {
+      // For Backblaze, preserve the URL as-is since it's likely pre-signed
+      console.log('[normalizeStaticUrl] Backblaze URL detected, preserving as-is');
+      return inputUrl;
+    }
+
+    // For other URLs, ensure proper encoding
     const segments = urlObj.pathname
       .split('/')
       .filter(Boolean)
-      .map(segment => encodeURIComponent(decodeURIComponent(segment)));
+      .map(segment => {
+        // Only encode if not already encoded
+        const decoded = decodeURIComponent(segment);
+        return decoded === segment ? encodeURIComponent(segment) : segment;
+      });
     urlObj.pathname = '/' + segments.join('/');
     return urlObj.toString();
-  } catch {
+  } catch (err) {
+    console.error('[normalizeStaticUrl] Error normalizing URL:', err.message);
     return inputUrl;
   }
 }
@@ -1249,7 +1267,16 @@ app.post('/api/compose', auth, async (req, res) => {
             ...page.staticPdfHeaders  // Add custom auth headers (Authorization, custom headers, etc.)
           };
 
-          console.log(`[Compose API] Page ${i}: Using headers:`, Object.keys(fetchHeaders).join(', '));
+          // Log headers (mask sensitive auth tokens)
+          const headersForLogging = Object.entries(fetchHeaders).map(([key, value]) => {
+            if (key.toLowerCase() === 'authorization' && value) {
+              // Mask the token but show the type (Bearer, Basic, etc.)
+              const parts = value.split(' ');
+              return `${key}: ${parts[0]} ***masked***`;
+            }
+            return `${key}: ${value}`;
+          });
+          console.log(`[Compose API] Page ${i}: Request headers:`, headersForLogging.join(', '));
 
           const response = await fetch(normalizedUrl, {
             headers: fetchHeaders
@@ -1257,14 +1284,62 @@ app.post('/api/compose', auth, async (req, res) => {
 
           if (!response.ok) {
             console.error(`[Compose API] Page ${i}: HTTP ${response.status} - ${response.statusText}`);
+            console.error(`[Compose API] Page ${i}: URL was: ${normalizedUrl}`);
+
+            // Try to get error details from response
+            try {
+              const errorText = await response.text();
+              if (errorText) {
+                console.error(`[Compose API] Page ${i}: Error response: ${errorText.substring(0, 200)}`);
+              }
+            } catch {}
             continue;
+          }
+
+          // Check Content-Type header
+          const contentType = response.headers.get('content-type') || '';
+          console.log(`[Compose API] Page ${i}: Response Content-Type: ${contentType}`);
+
+          // Warn if content type doesn't look like PDF
+          if (!contentType.includes('pdf') && !contentType.includes('octet-stream')) {
+            console.warn(`[Compose API] Page ${i}: WARNING - Content-Type '${contentType}' may not be a PDF`);
           }
 
           const arrayBuffer = await response.arrayBuffer();
           // CRITICAL: Use Uint8Array directly (NOT Buffer) - preserves binary data
           pdfData = new Uint8Array(arrayBuffer);
 
-          console.log(`[Compose API] Page ${i}: ✓ Fetched ${pdfData.length} bytes`);
+          // Validate that this is actually a PDF (check magic bytes)
+          if (pdfData.length < 4) {
+            console.error(`[Compose API] Page ${i}: Downloaded file too small (${pdfData.length} bytes)`);
+            continue;
+          }
+
+          // Check PDF magic bytes: %PDF (0x25504446)
+          const isPDF = (
+            pdfData[0] === 0x25 && // %
+            pdfData[1] === 0x50 && // P
+            pdfData[2] === 0x44 && // D
+            pdfData[3] === 0x46    // F
+          );
+
+          if (!isPDF) {
+            // Log the actual content for debugging
+            const asText = new TextDecoder('utf-8', { fatal: false }).decode(pdfData.slice(0, 500));
+            console.error(`[Compose API] Page ${i}: Downloaded content is NOT a PDF!`);
+            console.error(`[Compose API] Page ${i}: First 10 bytes (hex): ${Array.from(pdfData.slice(0, 10)).map(b => b.toString(16).padStart(2, '0')).join(' ')}`);
+            console.error(`[Compose API] Page ${i}: First 10 bytes (dec): [${Array.from(pdfData.slice(0, 10)).join(', ')}]`);
+            console.error(`[Compose API] Page ${i}: Expected PDF magic: 25 50 44 46 (%PDF)`);
+            console.error(`[Compose API] Page ${i}: Content preview: ${asText.substring(0, 200).replace(/[\r\n]+/g, ' ')}`);
+
+            // Check if it's HTML (common error response)
+            if (asText.toLowerCase().includes('<!doctype') || asText.toLowerCase().includes('<html')) {
+              console.error(`[Compose API] Page ${i}: Received HTML instead of PDF - likely an error page or authentication required`);
+            }
+            continue;
+          }
+
+          console.log(`[Compose API] Page ${i}: ✓ Fetched valid PDF (${pdfData.length} bytes)`);
         } catch (fetchError) {
           console.error(`[Compose API] Page ${i}: ✗ Fetch failed:`, fetchError.message);
           continue;
@@ -1284,7 +1359,12 @@ app.post('/api/compose', auth, async (req, res) => {
     }
 
     if (allPdfData.length === 0) {
-      return res.status(400).json({ error: 'No valid PDF data found' });
+      console.error(`[Compose API] No valid PDFs collected from ${pages.length} pages`);
+      return res.status(400).json({
+        error: 'No valid PDF data found',
+        details: `Attempted to process ${pages.length} pages but none resulted in valid PDF data. Check server logs for details.`,
+        pagesAttempted: pages.length
+      });
     }
 
     // CRITICAL FIX: Use pdf-merger-js (binary-level, preserves fonts)
