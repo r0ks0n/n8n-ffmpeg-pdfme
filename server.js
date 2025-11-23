@@ -1224,14 +1224,16 @@ app.post('/api/compose', auth, async (req, res) => {
       // Extract PDF data from data URL or HTTP URL
       let pdfData;
 
-      // Option 1: Data URL (base64 embedded)
+      // Option 1: Data URL (base64 embedded) - for personalized PDFs from Render node
       if (page.staticPdfDataUrl && page.staticPdfDataUrl.startsWith('data:')) {
         const base64Data = page.staticPdfDataUrl.split(',')[1];
         if (!base64Data) {
           console.error(`[Compose API] Page ${i}: Invalid data URL format`);
           continue;
         }
-        pdfData = Buffer.from(base64Data, 'base64');
+        // CRITICAL: Convert Buffer to Uint8Array for consistency with URL fetch
+        const buffer = Buffer.from(base64Data, 'base64');
+        pdfData = new Uint8Array(buffer);
         console.log(`[Compose API] Page ${i}: Using data URL (${pdfData.length} bytes)`);
       }
       // Option 2: HTTP URL (fetch from remote)
